@@ -1,0 +1,30 @@
+seed: 42
+artifacts_dir: artifacts
+data:
+  dataset: yelp
+  data_dir: data
+  min_user_interactions: 5
+  min_item_interactions: 5
+  recency_half_life: 30.0
+lightgcn:
+  embedding_dim: 64
+  n_layers: 3
+train:
+  epochs: 50
+  batch_size: 2048
+  lr: 0.001
+  weight_decay: 0.0001
+  device: cuda
+  num_workers: 4
+  neg_samples: 1
+  lambda_user_cl: 0.1
+  lambda_item_cl: 0.1
+  temperature: 0.2
+profile:
+  num_clusters: 200
+  cluster_representatives: 50
+  item_top_ratio: 0.05
+  profile_dim: 128
+  prompt_user_examples: 5
+  prompt_item_max_words: 80
+  llm_placeholder: true

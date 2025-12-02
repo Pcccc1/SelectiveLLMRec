@@ -1,8 +1,7 @@
 seed: 42
-artifacts_dir: artifacts
 data:
   dataset: yelp
-  data_dir: data
+  data_dir: datasets/yelp/yelp_processed
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0

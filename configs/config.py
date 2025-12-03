@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +33,7 @@ class TrainingConfig:
     lambda_user_cl: float = 0.1
     lambda_item_cl: float = 0.1
     temperature: float = 0.2
+    reg: float = 1e-4
 
 
 @dataclass
@@ -48,12 +49,11 @@ class ProfileConfig:
 
 @dataclass
 class ExperimentConfig:
-    data: DataConfig = DataConfig()
-    lightgcn: LightGCNConfig = LightGCNConfig()
-    train: TrainingConfig = TrainingConfig()
-    profile: ProfileConfig = ProfileConfig()
+    data: DataConfig = field(default_factory=DataConfig)
+    lightgcn: LightGCNConfig = field(default_factory=LightGCNConfig)
+    train: TrainingConfig = field(default_factory=TrainingConfig)
+    profile: ProfileConfig = field(default_factory=ProfileConfig)
     seed: int = 42
-    artifacts_dir: str = "artifacts"
 
     from typing import Union
 
@@ -66,5 +66,4 @@ class ExperimentConfig:
             train=TrainingConfig(**cfg_dict.get("train", {})),
             profile=ProfileConfig(**cfg_dict.get("profile", {})),
             seed=cfg_dict.get("seed", 42),
-            artifacts_dir=cfg_dict.get("artifacts_dir", "artifacts"),
         )

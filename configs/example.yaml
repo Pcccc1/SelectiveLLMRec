@@ -7,18 +7,16 @@ data:
   recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
-  n_layers: 3
+  n_layers: 2
 train:
   epochs: 50
-  batch_size: 2048
+  batch_size: 64
   lr: 0.001
   weight_decay: 0.0001
   device: cuda
-  num_workers: 4
+  num_workers: 0
   neg_samples: 1
-  lambda_user_cl: 0.1
-  lambda_item_cl: 0.1
-  temperature: 0.2
+  reg: 1e-4
 profile:
   num_clusters: 200
   cluster_representatives: 50

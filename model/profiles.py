@@ -10,7 +10,7 @@ import torch
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.feature_extraction.text import HashingVectorizer
 
-from .config import ProfileConfig
+from ..configs.config import ProfileConfig
 from .data_loading import InteractionData, compute_item_recency
 
 

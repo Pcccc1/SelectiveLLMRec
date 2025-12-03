@@ -31,30 +31,38 @@ class LightGCN(nn.Module):
         nn.init.xavier_uniform_(self.user_embedding.weight)
         nn.init.xavier_uniform_(self.item_embedding.weight)
 
-        self.register_buffer("adj_torch", _convert_sp_mat_to_sp_tensor(adj_mat))
+        # keep a coalesced sparse adjacency so sparse.mm gradients propagate correctly
+        self.register_buffer(
+            "adj_torch",
+            _convert_sp_mat_to_sp_tensor(adj_mat).coalesce(),
+        )
 
     def propagate(self):
-        all_embeddings = []
-        embeddings = torch.cat([self.user_embedding.weight, self.item_embedding.weight], dim=0)
-        all_embeddings.append(embeddings)
-        g = embeddings
+        g = torch.cat([self.user_embedding.weight,
+                    self.item_embedding.weight], dim=0)  # [U+I, d]
+
+        all_embeddings = [g]
+
         for _ in range(self.n_layers):
             g = torch.sparse.mm(self.adj_torch, g)
             all_embeddings.append(g)
-        all_embeddings = torch.stack(all_embeddings, dim=1).mean(dim=1)
-        user_g, item_g = torch.split(all_embeddings, [self.num_users, self.num_items], dim=0)
+
+        # LightGCN uses sum, not mean
+        all_embeddings = torch.stack(all_embeddings, dim=1).sum(dim=1)
+
+        user_g, item_g = torch.split(all_embeddings,
+                                    [self.num_users, self.num_items], dim=0)
         return user_g, item_g
 
-    def forward(self, users: torch.Tensor, items: torch.Tensor):
-        user_g, item_g = self.propagate()
-        user_e = self.user_embedding(users)
-        item_e = self.item_embedding(items)
-        return user_e, item_e, user_g[users], item_g[items]
 
+    def forward(self, users: torch.Tensor, pos_items: torch.Tensor, neg_items: torch.Tensor):
+        user_g, item_g = self.propagate()
+        return user_g[users], item_g[pos_items], item_g[neg_items]
+    
     def full_embeddings(self):
         user_g, item_g = self.propagate()
         return self.user_embedding.weight, self.item_embedding.weight, user_g, item_g
 
     def predict(self, users: torch.Tensor, items: torch.Tensor):
-        user_e, item_e, user_g, item_g = self.forward(users, items)
-        return (user_e + user_g) * (item_e + item_g)
+        user_g, item_g = self.propagate()
+        return (user_g[users] * item_g[items]).sum(dim=-1)

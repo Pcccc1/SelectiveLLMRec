@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from .lightgcn import LightGCN
-from .losses import bpr_loss, info_nce
+from ..utils.losses import bpr_loss, info_nce
 
 
 class FusionRecModel(nn.Module):

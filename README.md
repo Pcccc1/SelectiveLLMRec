@@ -27,3 +27,6 @@ Required columns:
 - LLM calls are stubbed with a placeholder (`LLMClient`) to keep the repo offline-friendly; plug in your own client in `src/profiles.py`.
 - User profiles are cluster-level (K-Means), item profiles only for top-K items ranked by degree/recency; others default to zero vectors.
 - Multi-view contrastive aligns GNN structural embeddings with semantic profiles on both user and high-value item sides.
+
+
+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

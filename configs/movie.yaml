@@ -1,0 +1,27 @@
+seed: 42
+data:
+  dataset: yelp
+  data_dir: datasets/movielens_1m/movielens_1m_processed
+  min_user_interactions: 5
+  min_item_interactions: 5
+  recency_half_life: 30.0
+lightgcn:
+  embedding_dim: 64
+  n_layers: 2
+train:
+  epochs: 50
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.0001
+  device: cuda
+  num_workers: 0
+  neg_samples: 1
+  reg: 1e-4
+profile:
+  num_clusters: 200
+  cluster_representatives: 50
+  item_top_ratio: 0.05
+  profile_dim: 128
+  prompt_user_examples: 5
+  prompt_item_max_words: 80
+  llm_placeholder: true

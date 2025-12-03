@@ -101,7 +101,7 @@ def train(cfg_path: str):
         # -----------------------------
         recall_res, ndcg_res = evaluate_all_ranking(
             model,
-            users=torch.LongTensor([x[0] for x in parser.val]),
+            users=torch.LongTensor(list(get_user_item_dict(parser.val).keys())),
             train_user_items=get_user_item_dict(parser.train),
             eval_user_items=get_user_item_dict(parser.val),
             K=[10, 20],
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/example.yaml",
+        default="configs/yelp.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

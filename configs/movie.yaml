@@ -9,7 +9,7 @@ lightgcn:
   embedding_dim: 64
   n_layers: 3
 train:
-  epochs: 50
+  epochs: 1000
   batch_size: 2048
   lr: 0.001
   weight_decay: 0

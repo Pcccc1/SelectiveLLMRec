@@ -31,11 +31,6 @@ def evaluate_all_ranking(
     K=[20],
     device="cpu",
 ):
-    """
-    users: tensor [B], 要评估的用户
-    train_user_items: dict[user] = set(items seen in train)
-    eval_user_items: dict[user] = set(items in val/test -- MULTI POSITIVE)
-    """
 
     model.eval()
     user_g, item_g = model.propagate()   # [U,d], [I,d]

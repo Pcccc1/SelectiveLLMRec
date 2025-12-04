@@ -10,12 +10,11 @@ lightgcn:
   n_layers: 2
 train:
   epochs: 50
-  batch_size: 64
+  batch_size: 1024
   lr: 0.001
-  weight_decay: 0.0001
+  weight_decay: 0
   device: cuda
   num_workers: 0
-  neg_samples: 1
   reg: 1e-4
 profile:
   num_clusters: 200

@@ -16,6 +16,7 @@ train:
   device: cuda
   num_workers: 0
   reg: 1e-4
+  save_path: checkpoints/lightgcn_best.pth
 profile:
   num_clusters: 200
   cluster_representatives: 50

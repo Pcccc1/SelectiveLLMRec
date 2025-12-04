@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import os
 from configs.config import ExperimentConfig
 import numpy as np
 import torch
@@ -72,6 +73,12 @@ def train(cfg_path: str):
         weight_decay=cfg.train.weight_decay,
     )
     
+
+    best_ncdg20 = -1.0
+    best_epoch = -1
+    save_path = cfg.train.save_path
+    os.makedirs("checkpoints", exist_ok=True)
+
     # step 7 : training loop
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -111,6 +118,56 @@ def train(cfg_path: str):
             f"Validation - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
             f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
         ) 
+        
+        if ndcg_res[20] > best_ncdg20:
+            best_ncdg20 = ndcg_res[20]
+            best_epoch = epoch + 1
+            assert save_path is not None
+            torch.save(model.state_dict(), save_path)
+            print(f"Best model saved at epoch {best_epoch} with NDCG@20: {best_ncdg20:.4f}")
+            
+    print(f"Training completed. Best NDCG@20: {best_ncdg20:.4f} at epoch {best_epoch}.")
+
+
+def test(cfg_path: str):
+    cfg = ExperimentConfig.from_yaml(cfg_path)
+    set_seed(cfg.seed)
+    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
+
+    reader = DataReader(cfg.data.data_dir)
+    train, val, test = reader.load_all()
+
+
+    parser = GraphDatasetParser(train, val, test)
+    parser.remap_ids()
+    parser.build_user_pos_items()
+    parser.build_adj_mat()
+    model = LightGCN(
+        num_users=parser.num_users,
+        num_items=parser.num_items,
+        embedding_dim=cfg.lightgcn.embedding_dim,
+        n_layers=cfg.lightgcn.n_layers,
+        adj_mat=parser.adj_mat,
+    ).to(device)
+    model.load_state_dict(torch.load(cfg.train.save_path, map_location=device))
+    model.eval()
+
+    test_dict = get_user_item_dict(parser.test)
+    test_users = torch.LongTensor(list(test_dict.keys()))
+
+    recall_res, ndcg_res = evaluate_all_ranking(
+        model,
+        users=test_users,
+        train_user_items=get_user_item_dict(parser.train),
+        eval_user_items=test_dict,
+        K=[10, 20],
+        device=device,
+    )
+
+    print(
+        f"Test Results - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
+        f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
+    )
 
 
 if __name__ == "__main__":
@@ -122,3 +179,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     train(args.config)
+    test(args.config)

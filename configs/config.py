@@ -34,6 +34,7 @@ class TrainingConfig:
     lambda_item_cl: float = 0.1
     temperature: float = 0.2
     reg: float = 1e-4
+    save_path: Optional[str] = None
 
 
 @dataclass

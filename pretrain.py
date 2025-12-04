@@ -101,30 +101,30 @@ def train(cfg_path: str):
         avg_loss = total_loss / len(loader)
         print(f"Epoch {epoch+1}/{cfg.train.epochs}, Loss: {avg_loss:.4f}")
     
-
+        if (epoch+1) % 10 == 0:
 
         # -----------------------------
         # Validation
         # -----------------------------
-        recall_res, ndcg_res = evaluate_all_ranking(
-            model,
-            users=torch.LongTensor(list(get_user_item_dict(parser.val).keys())),
-            train_user_items=get_user_item_dict(parser.train),
-            eval_user_items=get_user_item_dict(parser.val),
-            K=[10, 20],
-            device=device,
-        )  
-        print(
-            f"Validation - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
-            f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
-        ) 
-        
-        if ndcg_res[20] > best_ncdg20:
-            best_ncdg20 = ndcg_res[20]
-            best_epoch = epoch + 1
-            assert save_path is not None
-            torch.save(model.state_dict(), save_path)
-            print(f"Best model saved at epoch {best_epoch} with NDCG@20: {best_ncdg20:.4f}")
+            recall_res, ndcg_res = evaluate_all_ranking(
+                model,
+                users=torch.LongTensor(list(get_user_item_dict(parser.val).keys())),
+                train_user_items=get_user_item_dict(parser.train),
+                eval_user_items=get_user_item_dict(parser.val),
+                K=[10, 20],
+                device=device,
+            )  
+            print(
+                f"Validation - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
+                f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
+            ) 
+            
+            if ndcg_res[20] > best_ncdg20:
+                best_ncdg20 = ndcg_res[20]
+                best_epoch = epoch + 1
+                assert save_path is not None
+                torch.save(model.state_dict(), save_path)
+                print(f"Best model saved at epoch {best_epoch} with NDCG@20: {best_ncdg20:.4f}")
             
     print(f"Training completed. Best NDCG@20: {best_ncdg20:.4f} at epoch {best_epoch}.")
 

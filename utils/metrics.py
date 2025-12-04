@@ -57,12 +57,14 @@ def evaluate_all_ranking(
         # -------------------------
         if u in train_user_items:
             seen = train_user_items[u]
-            user_score[list(seen)] = -1e9
+            user_score[list(seen)] = -1e20
 
         # 全排序
         rank_list = np.argsort(-user_score)  # 降序排序
 
-        gt = eval_user_items[u]              # set 多正样本
+        gt = set(eval_user_items[u])              # set 多正样本
+        if not gt:
+            continue
 
         for k in K:
             recalls[k].append(recall_at_k(rank_list, gt, k))

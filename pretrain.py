@@ -152,17 +152,19 @@ def test(cfg_path: str):
     model.load_state_dict(torch.load(cfg.train.save_path, map_location=device))
     model.eval()
 
-    test_dict = get_user_item_dict(parser.test)
-    test_users = torch.LongTensor(list(test_dict.keys()))
+    
+    test_users = torch.LongTensor(list(get_user_item_dict(parser.test).keys()))
 
-    recall_res, ndcg_res = evaluate_all_ranking(
+    # 把 train/val 放成元组传入，并把返回的两个结果先保存为一个元组 `results`
+    results = evaluate_all_ranking(
         model,
         users=test_users,
-        train_user_items=get_user_item_dict(parser.train),
-        eval_user_items=test_dict,
+        train_user_items=get_user_item_dict(parser.train + parser.val),
+        eval_user_items=get_user_item_dict(parser.test),
         K=[10, 20],
         device=device,
     )
+    recall_res, ndcg_res = results
 
     print(
         f"Test Results - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
@@ -174,7 +176,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/yelp.yaml",
+        default="configs/movie.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

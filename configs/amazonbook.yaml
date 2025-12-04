@@ -1,7 +1,7 @@
 seed: 42
 data:
-  dataset: yelp
-  data_dir: datasets/movielens_1m/movielens_1m_processed
+  dataset: amazon_book
+  data_dir: datasets/amazon_book/amazon_book_processed
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0
@@ -10,13 +10,13 @@ lightgcn:
   n_layers: 3
 train:
   epochs: 50
-  batch_size: 2048
+  batch_size: 1024
   lr: 0.001
   weight_decay: 0
   device: cuda
   num_workers: 0
   reg: 1e-4
-  save_path: checkpoints/lightgcn_best_movie.pth
+  save_path: checkpoints/lightgcn_best_amaz.pth
 profile:
   num_clusters: 200
   cluster_representatives: 50

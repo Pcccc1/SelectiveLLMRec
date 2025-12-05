@@ -5,14 +5,24 @@ from torch import nn
 
 
 def _convert_sp_mat_to_sp_tensor(sp_mat) -> torch.sparse.FloatTensor:
+    """scipy.spmatrix -> torch.sparse.FloatTensor (coalesced)."""
     coo = sp_mat.tocoo()
-    indices = torch.stack((torch.from_numpy(coo.row), torch.from_numpy(coo.col)), dim=0)
+    indices = torch.stack(
+        (torch.from_numpy(coo.row), torch.from_numpy(coo.col)), dim=0
+    )
     values = torch.from_numpy(coo.data.astype("float32"))
     shape = coo.shape
-    return torch.sparse_coo_tensor(indices, values, torch.Size(shape))
+    sp_tensor = torch.sparse_coo_tensor(indices, values, torch.Size(shape))
+    return sp_tensor.coalesce()
 
 
 class LightGCN(nn.Module):
+    """
+    Standard LightGCN for user–item图上的推荐任务。
+
+    节点顺序固定为: [所有 user; 所有 item]，邻接矩阵 adj_mat 的行列顺序必须一致。
+    """
+
     def __init__(
         self,
         num_users: int,
@@ -22,47 +32,153 @@ class LightGCN(nn.Module):
         adj_mat,
     ):
         super().__init__()
+
         self.num_users = num_users
         self.num_items = num_items
         self.n_layers = n_layers
 
+        # ID embedding
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
+
         nn.init.xavier_uniform_(self.user_embedding.weight)
         nn.init.xavier_uniform_(self.item_embedding.weight)
 
-        # keep a coalesced sparse adjacency so sparse.mm gradients propagate correctly
-        self.register_buffer(
-            "adj_torch",
-            _convert_sp_mat_to_sp_tensor(adj_mat).coalesce(),
+        # 归一化后的拉普拉斯/邻接矩阵，稀疏格式
+        # 作为 buffer 注册，不参与梯度更新
+        self.register_buffer("adj_torch", _convert_sp_mat_to_sp_tensor(adj_mat))
+
+    # ------------------------------------------------------------------
+    # 核心：图传播（不区分 train / eval，单纯计算 GNN embedding）
+    # ------------------------------------------------------------------
+    def propagate(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        在归一化邻接矩阵上做 n_layers 次传播，并对各层 embedding 做聚合。
+
+        返回:
+            user_g: [num_users, d]
+            item_g: [num_items, d]
+        """
+        # 初始 embedding: [U+I, d]
+        g0 = torch.cat(
+            [self.user_embedding.weight, self.item_embedding.weight], dim=0
         )
 
-    def propagate(self):
-        g = torch.cat([self.user_embedding.weight,
-                    self.item_embedding.weight], dim=0)  # [U+I, d]
+        all_embeddings = [g0]
 
-        all_embeddings = [g]
-
+        g = g0
         for _ in range(self.n_layers):
+            # 稀疏矩阵乘法： [U+I, U+I] x [U+I, d] -> [U+I, d]
             g = torch.sparse.mm(self.adj_torch, g)
             all_embeddings.append(g)
 
-        # LightGCN uses sum, not mean
-        all_embeddings = torch.stack(all_embeddings, dim=1).sum(dim=1)
+        # [U+I, n_layers+1, d] -> 按层做 mean 聚合 (论文是平均)
+        all_embeddings = torch.stack(all_embeddings, dim=1).mean(dim=1)
+        # 如果你坚持 sum，把上面一行改成: .sum(dim=1)
 
-        user_g, item_g = torch.split(all_embeddings,
-                                    [self.num_users, self.num_items], dim=0)
+        # 切回 user / item
+        user_g, item_g = torch.split(
+            all_embeddings, [self.num_users, self.num_items], dim=0
+        )
         return user_g, item_g
 
+    # ------------------------------------------------------------------
+    # Embedding 接口：方便训练/评估统一调用
+    # ------------------------------------------------------------------
+    def get_all_embeddings(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        返回:
+            user_e: ID-level user embedding (nn.Embedding)
+            item_e: ID-level item embedding
+            user_g: GNN 聚合后的 user embedding
+            item_g: GNN 聚合后的 item embedding
+        """
+        user_e = self.user_embedding.weight  # [U, d]
+        item_e = self.item_embedding.weight  # [I, d]
+        user_g, item_g = self.propagate()
+        return user_e, item_e, user_g, item_g
 
-    def forward(self, users: torch.Tensor, pos_items: torch.Tensor, neg_items: torch.Tensor):
-        user_g, item_g = self.propagate()
-        return user_g[users], item_g[pos_items], item_g[neg_items]
-    
-    def full_embeddings(self):
-        user_g, item_g = self.propagate()
-        return self.user_embedding.weight, self.item_embedding.weight, user_g, item_g
+    # ------------------------------------------------------------------
+    # 训练阶段：BPR 用的 forward
+    # ------------------------------------------------------------------
+    def forward(
+        self,
+        users: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        BPR 训练使用的前向:
 
-    def predict(self, users: torch.Tensor, items: torch.Tensor):
-        user_g, item_g = self.propagate()
-        return (user_g[users] * item_g[items]).sum(dim=-1)
+        输入:
+            users:     [B]
+            pos_items: [B]
+            neg_items: [B]
+
+        返回:
+            u_g:   [B, d]   对应 users 的 GNN embedding
+            pos_g: [B, d]   正样本 item 的 GNN embedding
+            neg_g: [B, d]   负样本 item 的 GNN embedding
+        """
+        _, _, user_g, item_g = self.get_all_embeddings()
+
+        u_g = user_g[users]           # [B, d]
+        pos_g = item_g[pos_items]     # [B, d]
+        neg_g = item_g[neg_items]     # [B, d]
+
+        return u_g, pos_g, neg_g
+
+    # ------------------------------------------------------------------
+    # 推理接口：预测任意 (user, item) 对的得分
+    # ------------------------------------------------------------------
+    def predict(
+        self,
+        users: torch.Tensor,
+        items: torch.Tensor,
+        use_graph_embedding: bool = True,
+    ) -> torch.Tensor:
+        """
+        预测一批 (user, item) pair 的偏好得分。
+
+        输入:
+            users: [B]
+            items: [B] 或 [B, K] (后者一般自己写广播或展开)
+            use_graph_embedding: True 时用 GNN embedding，否则用 ID embedding
+
+        返回:
+            scores: [B] 对应 user-item 的打分
+        """
+        user_e, item_e, user_g, item_g = self.get_all_embeddings()
+
+        if use_graph_embedding:
+            u = user_g[users]
+            v = item_g[items]
+        else:
+            u = user_e[users]
+            v = item_e[items]
+
+        # 点积
+        return (u * v).sum(dim=-1)
+
+    # ------------------------------------------------------------------
+    # 全排序评估：给定一批 user，对所有 item 打分
+    # ------------------------------------------------------------------
+    @torch.no_grad()
+    def full_sort_scores(self, users: torch.Tensor) -> torch.Tensor:
+        """
+        All-ranking 评估用:
+        输入:
+            users: [B]
+        返回:
+            scores: [B, num_items]，第 i 行是 user_i 对所有 item 的打分
+        """
+        _, _, user_g, item_g = self.get_all_embeddings()
+
+        u = user_g[users]          # [B, d]
+        i = item_g                 # [I, d]
+
+        # [B, d] x [d, I] -> [B, I]
+        scores = torch.matmul(u, i.t())
+        return scores

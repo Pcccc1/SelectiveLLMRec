@@ -41,8 +41,8 @@ class LightGCN(nn.Module):
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
 
-        nn.init.xavier_uniform_(self.user_embedding.weight)
-        nn.init.xavier_uniform_(self.item_embedding.weight)
+        nn.init.normal_(self.user_embedding.weight, std=0.1)
+        nn.init.normal_(self.item_embedding.weight, std=0.1)
 
         # 归一化后的拉普拉斯/邻接矩阵，稀疏格式
         # 作为 buffer 注册，不参与梯度更新
@@ -52,33 +52,25 @@ class LightGCN(nn.Module):
     # 核心：图传播（不区分 train / eval，单纯计算 GNN embedding）
     # ------------------------------------------------------------------
     def propagate(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        在归一化邻接矩阵上做 n_layers 次传播，并对各层 embedding 做聚合。
 
-        返回:
-            user_g: [num_users, d]
-            item_g: [num_items, d]
-        """
         # 初始 embedding: [U+I, d]
-        g0 = torch.cat(
+        all_emb = torch.cat(
             [self.user_embedding.weight, self.item_embedding.weight], dim=0
-        )
+        )                                   # [N, d], N = U + I
 
-        all_embeddings = [g0]
-
-        g = g0
+        # 累加每一层的 embedding（包括 0 层）
+        out = all_emb                       # 累加器，先放第 0 层
+        g = all_emb
         for _ in range(self.n_layers):
-            # 稀疏矩阵乘法： [U+I, U+I] x [U+I, d] -> [U+I, d]
-            g = torch.sparse.mm(self.adj_torch, g)
-            all_embeddings.append(g)
+            g = torch.sparse.mm(self.adj_torch, g)   # [N, d]
+            out = out + g                            # 在线累加，不存中间层
 
-        # [U+I, n_layers+1, d] -> 按层做 mean 聚合 (论文是平均)
-        all_embeddings = torch.stack(all_embeddings, dim=1).mean(dim=1)
-        # 如果你坚持 sum，把上面一行改成: .sum(dim=1)
+        # 按论文，等价于对 (K+1) 层取平均，这里直接 / (K+1)
+        out = out / (self.n_layers + 1)
 
         # 切回 user / item
         user_g, item_g = torch.split(
-            all_embeddings, [self.num_users, self.num_items], dim=0
+            out, [self.num_users, self.num_items], dim=0
         )
         return user_g, item_g
 

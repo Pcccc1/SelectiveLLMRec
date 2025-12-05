@@ -2,16 +2,18 @@ import torch
 import torch.nn.functional as F
 
 
-def bpr_loss(z_user, z_pos, z_neg, reg: float = 0.0):
+def bpr_loss(z_user, z_pos, z_neg, reg: float = 0.0, user_id_emb=None, pos_id_emb=None, neg_id_emb=None):
     pos_scores = (z_user * z_pos).sum(dim=-1)
     neg_scores = (z_user * z_neg).sum(dim=-1)
     loss = -F.logsigmoid(pos_scores - neg_scores).mean()
 
-    if reg > 0:
-        reg_term = (z_user.norm(2).pow(2) + z_pos.norm(2).pow(2) + z_neg.norm(2).pow(2)) / (
-            z_user.size(0)
-        )
-        loss = loss + reg * reg_term
+    if reg > 0 and user_id_emb is not None and pos_id_emb is not None and neg_id_emb is not None:
+        reg_term = (
+            user_id_emb.norm(2).pow(2)
+            + pos_id_emb.norm(2).pow(2)
+            + neg_id_emb.norm(2).pow(2)
+        ) / user_id_emb.size(0)
+        loss = loss + 0.5 * reg * reg_term
     return loss
 
 

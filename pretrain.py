@@ -31,7 +31,11 @@ def train(cfg_path: str):
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
 
     # step 1 : load data
-    reader = DataReader(cfg.data.data_dir)
+    reader = DataReader(
+        cfg.data.data_dir,
+        min_user_interactions=cfg.data.min_user_interactions,
+        min_item_interactions=cfg.data.min_item_interactions,
+    )
     train, val, test = reader.load_all()
 
     # step 2 : parse dataset and remap ids
@@ -42,7 +46,8 @@ def train(cfg_path: str):
 
     # step 3 : build dataset
     dataset = GraphPretrainDataset(
-        parser.user_pos_items, parser.num_users, parser.num_items
+        train_pairs=parser.train,
+        user_pos_items=parser.user_pos_items,
     )
 
     # step 4 : dataloader
@@ -70,7 +75,7 @@ def train(cfg_path: str):
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=cfg.train.lr,
-        weight_decay=cfg.train.weight_decay,
+        weight_decay=float(cfg.train.weight_decay),
     )
     
 
@@ -90,7 +95,19 @@ def train(cfg_path: str):
 
             user_g, pos_g, neg_g = model(users, pos_items, neg_items)
 
-            loss = criterion(z_user=user_g, z_pos=pos_g, z_neg=neg_g, reg=float(cfg.train.reg))
+            user_id_emb = model.user_embedding(users)
+            pos_id_emb = model.item_embedding(pos_items)
+            neg_id_emb = model.item_embedding(neg_items)
+
+            loss = criterion(
+                z_user=user_g,
+                z_pos=pos_g,
+                z_neg=neg_g,
+                reg=float(cfg.train.reg),
+                user_id_emb=user_id_emb,
+                pos_id_emb=pos_id_emb,
+                neg_id_emb=neg_id_emb,
+            )
 
             optimizer.zero_grad()
             loss.backward()
@@ -134,7 +151,11 @@ def test(cfg_path: str):
     set_seed(cfg.seed)
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
 
-    reader = DataReader(cfg.data.data_dir)
+    reader = DataReader(
+        cfg.data.data_dir,
+        min_user_interactions=cfg.data.min_user_interactions,
+        min_item_interactions=cfg.data.min_item_interactions,
+    )
     train, val, test = reader.load_all()
 
 
@@ -159,7 +180,7 @@ def test(cfg_path: str):
     results = evaluate_all_ranking(
         model,
         users=test_users,
-        train_user_items=get_user_item_dict(parser.train + parser.val),
+        train_user_items=get_user_item_dict(parser.train),
         eval_user_items=get_user_item_dict(parser.test),
         K=[10, 20],
         device=device,
@@ -176,7 +197,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/movie.yaml",
+        default="configs/yelp.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

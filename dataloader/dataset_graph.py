@@ -5,18 +5,19 @@ from torch.utils.data import Dataset
 from scipy.sparse import coo_matrix, diags
 
 class GraphPretrainDataset(Dataset):
-    def __init__(self, user_pos_items, num_users, num_items):
-        self.user_pos_items = user_pos_items  
-        self.users = [u for u in range(num_users) if len(user_pos_items[u]) > 0]
-        self.num_users = num_users
-        self.num_items = num_items
+    def __init__(self, train_pairs, user_pos_items):
+        """
+        train_pairs: list of (u, i) after remap
+        user_pos_items: dict u -> set of positives (for negative sampling)
+        """
+        self.pairs = train_pairs
+        self.user_pos_items = user_pos_items
 
     def __len__(self):
-        return len(self.users)
+        return len(self.pairs)
 
     def __getitem__(self, idx):
-        u = self.users[idx]
-        pos_item = random.choice(self.user_pos_items[u])
+        u, pos_item = self.pairs[idx]
         return u, pos_item
 
 
@@ -59,9 +60,9 @@ class GraphDatasetParser:
 
     # 构建用户-正样本项的字典
     def build_user_pos_items(self):
-        self.user_pos_items = {u: [] for u in range(self.num_users)}
+        self.user_pos_items = {u: set() for u in range(self.num_users)}
         for u, i in self.train:
-            self.user_pos_items[u].append(i)
+            self.user_pos_items[u].add(i)
 
     # 构建用户-正样本项的稀疏矩阵
     def build_adj_mat(self):

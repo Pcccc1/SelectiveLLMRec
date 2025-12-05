@@ -1,15 +1,15 @@
 seed: 42
 data:
   dataset: yelp
-  data_dir: datasets/yelp/yelp_processed
+  data_dir: datasets/yelp/yelp_subset
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
-  n_layers: 2
+  n_layers: 3
 train:
-  epochs: 500
+  epochs: 1000
   batch_size: 1024
   lr: 0.001
   weight_decay: 0

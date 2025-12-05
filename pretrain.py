@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import wandb
+
 import argparse
 import random
 import os
@@ -26,6 +28,7 @@ def set_seed(seed: int):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
+    wandb.init(project="SelectiveLLMRec", config=cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
@@ -116,6 +119,7 @@ def train(cfg_path: str):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
+        wandb.log({"Loss": avg_loss})
         print(f"Epoch {epoch+1}/{cfg.train.epochs}, Loss: {avg_loss:.4f}")
     
         if (epoch+1) % 10 == 0:
@@ -135,6 +139,12 @@ def train(cfg_path: str):
                 f"Validation - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
                 f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
             ) 
+            wandb.log({
+                "Val_Recall@10": recall_res[10],
+                "Val_NDCG@10": ndcg_res[10],
+                "Val_Recall@20": recall_res[20],
+                "Val_NDCG@20": ndcg_res[20],
+            })
             
             if ndcg_res[20] > best_ncdg20:
                 best_ncdg20 = ndcg_res[20]

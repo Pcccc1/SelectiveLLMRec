@@ -8,6 +8,7 @@ import os
 from configs.config import ExperimentConfig
 import numpy as np
 import torch
+import pickle
 from torch.utils.data import DataLoader
 
 from dataloader.data_reader import DataReader
@@ -26,14 +27,12 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def train(cfg_path: str):
+def load_data(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    wandb.init(project="SelectiveLLMRec", config=cfg)
     set_seed(cfg.seed)
-
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
 
-    # step 1 : load data
+
     reader = DataReader(
         cfg.data.data_dir,
         min_user_interactions=cfg.data.min_user_interactions,
@@ -46,6 +45,26 @@ def train(cfg_path: str):
     parser.remap_ids()
     parser.build_user_pos_items()
     parser.build_adj_mat()
+
+    print("Data loaded and parsing.")
+
+    with open(cfg.data.dataset + "_parser.pkl", "wb") as f:
+        pickle.dump(parser, f)
+
+    print("Parser saved to parser.pkl")
+
+def train(cfg_path: str):
+    cfg = ExperimentConfig.from_yaml(cfg_path)
+    #wandb.init(project="SelectiveLLMRec_pretrain", config=cfg)
+    set_seed(cfg.seed)
+
+    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
+
+    print(f"Loading parser from {cfg.data.dataset}_parser.pkl")
+    with open(cfg.data.dataset + "_parser.pkl", "rb") as f:
+        parser: GraphDatasetParser = pickle.load(f)
+
+    print("Parser loaded.")
 
     # step 3 : build dataset
     dataset = GraphPretrainDataset(
@@ -87,6 +106,7 @@ def train(cfg_path: str):
     save_path = cfg.train.save_path
     os.makedirs("checkpoints", exist_ok=True)
 
+    print("Starting training...")
     # step 7 : training loop
     for epoch in range(cfg.train.epochs):
         model.train()
@@ -207,9 +227,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/yelp.yaml",
+        default="configs/movie.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()
+    load_data(args.config)
     train(args.config)
     test(args.config)

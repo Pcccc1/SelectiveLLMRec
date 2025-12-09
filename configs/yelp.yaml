@@ -1,6 +1,7 @@
 seed: 42
 data:
   dataset: yelp
+  profile_path: datasets/yelp/yelp_subset/item_profile.json
   data_dir: datasets/yelp/yelp_subset
   min_user_interactions: 5
   min_item_interactions: 5

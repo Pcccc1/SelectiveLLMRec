@@ -6,7 +6,8 @@ import torch
 from torch import nn
 
 from .lightgcn import LightGCN
-from ..utils.losses import bpr_loss, info_nce
+from sklearn.preprocessing import normalize
+from sklearn.cluster import KMeans
 
 
 class FusionRecModel(nn.Module):
@@ -106,3 +107,16 @@ class FusionRecModel(nn.Module):
         anchor = g_item_full[items][mask]
         positive = profiles[mask]
         return info_nce(anchor, positive, temperature)
+
+
+class UserClusterer:
+    def __init__(self, num_clusters=100):   
+        self.num_clusters = num_clusters
+    
+    def cluster(self, user_g):
+        emb = user_g.detach().cpu().numpy()
+        emb = normalize(emb, norm='l2')
+        kmeans = KMeans(n_clusters=self.num_clusters, random_state=42, n_init='auto')
+        cluster_ids = kmeans.fit_predict(emb)
+
+        return cluster_ids, kmeans.cluster_centers_

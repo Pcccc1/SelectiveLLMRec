@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+import json
 
 
 class DataReader:
@@ -56,3 +57,113 @@ class DataReader:
         val_f = [(u, i) for split, u, i in combined if split == "val"]
         test_f = [(u, i) for split, u, i in combined if split == "test"]
         return train_f, val_f, test_f
+
+
+class YelpItemProfileReader:
+    def __init__(self, json_path):
+        self.json_path = json_path  # dataset folder path
+
+
+    def parse_profile(self, raw_str):
+        raw_str = raw_str.strip()
+        parts = [p.strip() for p in raw_str.split(";") if p.strip()]
+
+        if len(parts) == 0:
+            return {"name": "", "categories": []}
+
+        name = parts[0].strip('"')
+        categories = parts[1:]
+
+        return {
+            "name": name,
+            "categories": categories
+        }
+    
+
+    def load(self, parser):
+        with open(self.json_path, "r") as f:
+            raw_profiles = json.load(f)
+        item_profiles = {}
+        for raw_id, raw_txt in raw_profiles.items():
+            if raw_id in parser.item2id.keys():
+                continue
+            item_profiles[parser.item2id[raw_id]] = self.parse_profile(raw_txt)
+        return item_profiles
+    
+    
+class AmazonBookItemProfileReader:
+    def __init__(self, json_path):
+        self.json_path = json_path
+
+    def parse_categories(self, cats):
+
+        flat = set()
+        for path in cats:
+            for c in path:
+                c = c.strip()
+                if c:
+                    flat.add(c)
+        return list(flat)
+
+    def load(self, parser):
+
+        with open(self.json_path, "r") as f:
+            raw = json.load(f)
+
+        item_profiles = {}
+
+        for raw_item_id, data in raw.items():
+            if raw_item_id not in parser.item2id:
+                continue
+
+            new_id = parser.item2id[raw_item_id]
+
+            title = data.get("title", "").strip()
+
+            categories = data.get("categories", [])
+            categories = self.parse_categories(categories)
+
+            description = data.get("description", "").strip()
+
+            item_profiles[new_id] = {
+                "title": title,
+                "categories": categories,
+                "description": description
+            }
+
+        return item_profiles
+
+
+class MovieItemProfileReader:
+
+    def __init__(self, json_path):
+        self.json_path = json_path
+
+    def parse_genres(self, genre_str):
+        if not genre_str:
+            return []
+        return [g.strip() for g in genre_str.split("|") if g.strip()]
+
+    def load(self, parser):
+
+        with open(self.json_path, "r") as f:
+            raw = json.load(f)
+
+        item_profiles = {}
+
+        for raw_item_id, data in raw.items():
+            # 如果 item 不在 graph dataset 里，则跳过
+            if raw_item_id not in parser.item2id:
+                continue
+
+            new_id = parser.item2id[raw_item_id]
+
+            title = data.get("title", "").strip()
+            genres = self.parse_genres(data.get("genres", ""))
+
+            item_profiles[new_id] = {
+                "title": title,
+                "genres": genres
+            }
+
+        return item_profiles

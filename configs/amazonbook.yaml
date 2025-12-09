@@ -2,6 +2,7 @@ seed: 42
 data:
   dataset: amazon_book
   data_dir: datasets/amazon_book/amazon_book_processed
+  profile_path: datasets/amazon_book/amazon_book_processed/item_profile.json
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0

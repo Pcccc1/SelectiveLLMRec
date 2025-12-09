@@ -11,7 +11,7 @@ class GeneralItemProfileManager:
         self.parser = parser
         self.profile_path = profile_path
 
-    def load(self):
+    def load(self, format="unified"):
         if self.dataset_name == "yelp":
             reader = YelpItemProfileReader(self.profile_path)
         elif self.dataset_name == "amazon_book":
@@ -24,8 +24,21 @@ class GeneralItemProfileManager:
         raw_profiles = reader.load(self.parser)
         unified = {}
 
-        for item_id, prof in raw_profiles.items():
-            unified[item_id] = self.to_unified_format(prof, self.dataset_name)
+        if format == "yelp" and self.dataset_name == "yelp":
+            for item_id, prof in raw_profiles.items():
+                unified[item_id] = self.to_yelp_format(prof)
+            return unified
+        elif format == "amazon" and self.dataset_name == "amazon_book":
+            for item_id, prof in raw_profiles.items():
+                unified[item_id] = self.to_amazon_format(prof)
+            return unified
+        elif format == "movie" and self.dataset_name == "movie":
+            for item_id, prof in raw_profiles.items():
+                unified[item_id] = self.to_movie_format(prof)
+            return unified
+        else:
+            for item_id, prof in raw_profiles.items():
+                unified[item_id] = self.to_unified_format(prof, self.dataset_name)
 
         return unified
 
@@ -60,3 +73,32 @@ class GeneralItemProfileManager:
             "description": description,
             "raw": prof
         }
+
+    def to_yelp_format(self, prof):
+        name = prof.get("name", "")
+        categories = prof.get("categories", [])
+
+        return {
+            "name": name,
+            "categories": categories
+        }
+
+    def to_amazon_format(self, prof):
+        title = prof.get("title", "")
+        categories = prof.get("categories", [])
+        description = prof.get("description", "")
+
+        return {
+            "title": title,
+            "categories": categories,
+            "description": description
+        }
+    
+    def to_movie_format(self, prof):
+        title = prof.get("title", "")
+        genres = prof.get("genres", [])
+
+        return {
+            "title": title,
+            "genres": genres
+        }   

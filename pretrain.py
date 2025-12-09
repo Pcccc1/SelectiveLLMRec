@@ -227,10 +227,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/movie.yaml",
+        default="configs/yelp.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()
     load_data(args.config)
-    train(args.config)
-    test(args.config)
+    # train(args.config)
+    # test(args.config)

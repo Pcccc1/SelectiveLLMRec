@@ -12,6 +12,7 @@ class DataConfig:
     min_user_interactions: int = 5
     min_item_interactions: int = 5
     recency_half_life: float = 30.0  # days
+    profile_path: Optional[str] = None
 
 
 @dataclass
@@ -40,6 +41,7 @@ class TrainingConfig:
 @dataclass
 class ProfileConfig:
     num_clusters: int = 200
+    top_k: int = 20
     cluster_representatives: int = 50
     item_top_ratio: float = 0.05
     profile_dim: int = 128

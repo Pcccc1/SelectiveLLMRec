@@ -1,4 +1,3 @@
-import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -21,10 +20,7 @@ class GraphPretrainDataset(Dataset):
         return u, pos_item
 
 
-
-
 class GraphDatasetParser:
-    #TODO: 增强的metedata还没有做映射
     def __init__(self, train, val, test):
         self.train = train
         self.val = val
@@ -83,6 +79,7 @@ class GraphDatasetParser:
         # Symmetric normalized adjacency used by LightGCN: D^{-1/2} A D^{-1/2}
         norm_adj = d_mat_inv_sqrt @ adj @ d_mat_inv_sqrt
         self.adj_mat = norm_adj.tocsr()
+
 
 
 def collate_graph(batch, neg_sample):

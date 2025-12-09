@@ -85,7 +85,7 @@ class YelpItemProfileReader:
             raw_profiles = json.load(f)
         item_profiles = {}
         for raw_id, raw_txt in raw_profiles.items():
-            if raw_id in parser.item2id.keys():
+            if raw_id not in parser.item2id.keys():
                 continue
             item_profiles[parser.item2id[raw_id]] = self.parse_profile(raw_txt)
         return item_profiles

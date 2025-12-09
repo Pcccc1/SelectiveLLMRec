@@ -7,8 +7,8 @@ data:
   min_item_interactions: 5
   recency_half_life: 30.0
 lightgcn:
-  embedding_dim: 32
-  n_layers: 2
+  embedding_dim: 64
+  n_layers: 3
 train:
   epochs: 1000
   batch_size: 1024

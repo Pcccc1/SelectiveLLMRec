@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import wandb
-
+import os
 import argparse
 import random
 from configs.config import ExperimentConfig
 import numpy as np
 import torch
 import pickle
+import json
 from collections import defaultdict
 
 from model.lightgcn import LightGCN
 from dataloader.manager import GeneralItemProfileManager
 from utils.cluster_statistic import ClusterProfile
-from prompt.build_prompt import build_cluster_text
+from utils.cluster_encoder import ClusterEmbeddingEncoder
 
+from prompt.cluster_summer import ClusterProfileSummarizer
 
 from model.model import UserClusterer
+
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -72,11 +76,24 @@ def train(cfg_path: str):
     )
     cluster_profile = cp.get_cluster_profiles(top_k=cfg.profile.top_k)
     
-    print(cluster_profile)
+    # summarizer = ClusterProfileSummarizer()
 
-    prompt_txt = build_cluster_text(profile=cluster_profile[0])
-    print(prompt_txt)
+    # all_summaries = {}
 
+    # for cid, cluster in cluster_profile.items():
+    #     summary = summarizer.summarize_cluster(cluster_id=cid, cluster_data=cluster)
+    #     all_summaries[int(cid)] = summary
+    
+    # with open("cluster_summaries.json", "w") as f:
+    #     json.dump(all_summaries, f, indent=2, ensure_ascii=False)
+
+    
+    encoder = ClusterEmbeddingEncoder(
+        summary_json_path="./cluster_summaries.json",
+        save_path="./cluster_embeddings.pt"
+    )
+
+    embeddings = encoder.run()
 
 
 if __name__ == "__main__":

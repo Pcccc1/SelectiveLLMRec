@@ -41,6 +41,7 @@ class ClusterSemanticFusion(nn.Module):
         # --------------------------
         # 1. Register cluster embedding (LLM)
         # --------------------------
+        cluster_emb = cluster_emb.to(device)
         self.cluster_emb = nn.Embedding(cluster_emb.size(0), cluster_emb.size(1))
         self.cluster_emb.weight = nn.Parameter(cluster_emb, requires_grad=False)
 
@@ -60,19 +61,26 @@ class ClusterSemanticFusion(nn.Module):
         print("[Fusion] Computing alpha using Gaussian distance decay...")
 
         user_feature = user_feature.to(device)
-        cluster_centers = cluster_centers.to(device)
-        user_cluster = user_cluster.to(device)
+        cluster_centers = cluster_centers.to(device=device, dtype=user_feature.dtype)
+        user_cluster = user_cluster.to(device).long()
+
+        # use the same normalized space as KMeans clustering for distance
+        user_feature = F.normalize(user_feature, p=2, dim=1)
 
         # distance to cluster center
         dist = torch.norm(user_feature - cluster_centers[user_cluster], dim=1)  # [num_users]
 
         # compute sigma for each cluster
         num_clusters = cluster_centers.size(0)
-        sigma = torch.zeros(num_clusters, device=device)
+        sigma = torch.zeros(num_clusters, device=device, dtype=user_feature.dtype)
 
         for c in range(num_clusters):
             mask = (user_cluster == c)
-            sigma[c] = dist[mask].mean()
+            if mask.any():
+                sigma[c] = dist[mask].mean()
+            else:
+                # rare case: empty cluster from KMeans, back off to global mean
+                sigma[c] = dist.mean()
 
         sigma_u = sigma[user_cluster]  # per-user sigma
 

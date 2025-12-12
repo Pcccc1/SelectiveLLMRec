@@ -66,8 +66,8 @@ def train(cfg_path: str):
 
     cluster_users = defaultdict(list)
     
-    for c, uid in enumerate(cluster_id):
-        cluster_users[uid].append(c)
+    for user_idx, cid in enumerate(cluster_id):
+        cluster_users[cid].append(user_idx)
 
     cp = ClusterProfile(
         parser=parser,
@@ -95,15 +95,19 @@ def train(cfg_path: str):
 
     # embeddings = encoder.run()
 
-    cluster_embeddings = torch.load("cluster_embeddings.pt")
-    cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())])
+    cluster_embeddings = torch.load("cluster_embeddings.pt", map_location=device)
+    cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device, dtype=user_g.dtype)
+    cluster_centers = torch.tensor(cluster_centers, device=device, dtype=user_g.dtype)
+    user_cluster = torch.tensor(cluster_id, device=device, dtype=torch.long)
+
     fusion = ClusterSemanticFusion(
         embed_dim=cfg.lightgcn.embedding_dim,
         cluster_emb=cluster_emb,
         user_feature=user_g,
-        cluster_centers=torch.Tensor(cluster_centers),
-        user_cluster=torch.LongTensor(cluster_id)
-    )
+        cluster_centers=cluster_centers,
+        user_cluster=user_cluster,
+        device=device
+    ).to(device)
 
     
 
@@ -118,4 +122,3 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     train(args.config)
-

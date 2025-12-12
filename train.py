@@ -18,7 +18,7 @@ from utils.cluster_encoder import ClusterEmbeddingEncoder
 
 from prompt.cluster_summer import ClusterProfileSummarizer
 
-from model.model import UserClusterer
+from model.model import UserClusterer, ClusterSemanticFusion
 
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
@@ -88,12 +88,25 @@ def train(cfg_path: str):
     #     json.dump(all_summaries, f, indent=2, ensure_ascii=False)
 
     
-    encoder = ClusterEmbeddingEncoder(
-        summary_json_path="./cluster_summaries.json",
-        save_path="./cluster_embeddings.pt"
+    # encoder = ClusterEmbeddingEncoder(
+    #     summary_json_path="./cluster_summaries.json",
+    #     save_path="./cluster_embeddings.pt"
+    # )
+
+    # embeddings = encoder.run()
+
+    cluster_embeddings = torch.load("cluster_embeddings.pt")
+    cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())])
+    fusion = ClusterSemanticFusion(
+        embed_dim=cfg.lightgcn.embedding_dim,
+        cluster_emb=cluster_emb,
+        user_feature=user_g,
+        cluster_centers=torch.Tensor(cluster_centers),
+        user_cluster=torch.LongTensor(cluster_id)
     )
 
-    embeddings = encoder.run()
+    
+
 
 
 if __name__ == "__main__":

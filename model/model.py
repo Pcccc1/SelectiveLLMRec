@@ -8,105 +8,106 @@ from torch import nn
 from .lightgcn import LightGCN
 from sklearn.preprocessing import normalize
 from sklearn.cluster import KMeans
+import torch.nn.functional as F
 
 
-class FusionRecModel(nn.Module):
+class ClusterSemanticFusion(nn.Module):
+    """
+    Fusion module for:
+        user graph embedding (g_u)
+        + distance-aware cluster semantic embedding (LLM)
+    
+    final_u = g_u + alpha_u * proj(cluster_emb)
+    
+    Components:
+    - Projection 768 → embed_dim
+    - LayerNorm
+    - Alpha computation using Gaussian kernel
+    """
+
     def __init__(
         self,
-        num_users: int,
-        num_items: int,
-        embedding_dim: int,
-        n_layers: int,
-        adj_mat,
-        profile_dim: int,
-        hidden_dim: int | None = None,
+        embed_dim: int,                           # LightGCN dim
+        cluster_emb: torch.Tensor,                # [K, 768]
+        user_feature: torch.Tensor,               # [num_users, D]  (pretrain g_u)
+        cluster_centers: torch.Tensor,            # [K, D]
+        user_cluster: torch.Tensor,               # [num_users]
+        device="cuda",
     ):
         super().__init__()
-        self.lightgcn = LightGCN(num_users, num_items, embedding_dim, n_layers, adj_mat)
-        hidden_dim = hidden_dim or embedding_dim
-        fusion_dim = embedding_dim * 2 + profile_dim
-        self.user_proj = nn.Linear(fusion_dim, hidden_dim)
-        self.item_proj = nn.Linear(fusion_dim, hidden_dim)
+        self.embed_dim = embed_dim
+        self.device = device
 
-        self.register_buffer(
-            "user_profiles", torch.zeros((num_users, profile_dim), dtype=torch.float32)
-        )
-        self.register_buffer(
-            "item_profiles", torch.zeros((num_items, profile_dim), dtype=torch.float32)
-        )
+        # --------------------------
+        # 1. Register cluster embedding (LLM)
+        # --------------------------
+        self.cluster_emb = nn.Embedding(cluster_emb.size(0), cluster_emb.size(1))
+        self.cluster_emb.weight = nn.Parameter(cluster_emb, requires_grad=False)
 
-    def load_profiles(self, user_profiles: torch.Tensor, item_profiles: torch.Tensor):
-        self.user_profiles = user_profiles.to(self.user_profiles.device)
-        self.item_profiles = item_profiles.to(self.item_profiles.device)
+        # --------------------------
+        # 2. Projection 768 → embed_dim
+        # --------------------------
+        self.proj = nn.Linear(cluster_emb.size(1), embed_dim)
 
-    def representations(
-        self, users: torch.Tensor, items: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        id_user, id_item, g_user, g_item = self.lightgcn.full_embeddings()
-        z_u = self._fuse_user(id_user[users], g_user[users], self.user_profiles[users])
-        z_i = self._fuse_item(id_item[items], g_item[items], self.item_profiles[items])
-        return z_u, z_i
+        # --------------------------
+        # 3. LayerNorm for stability
+        # --------------------------
+        self.norm = nn.LayerNorm(embed_dim)
 
-    def _fuse_user(self, e: torch.Tensor, g: torch.Tensor, p: torch.Tensor):
-        x = torch.cat([e, g, p], dim=-1)
-        return self.user_proj(x)
+        # --------------------------
+        # 4. Precompute alpha (Gaussian decay)
+        # --------------------------
+        print("[Fusion] Computing alpha using Gaussian distance decay...")
 
-    def _fuse_item(self, e: torch.Tensor, g: torch.Tensor, p: torch.Tensor):
-        x = torch.cat([e, g, p], dim=-1)
-        return self.item_proj(x)
+        user_feature = user_feature.to(device)
+        cluster_centers = cluster_centers.to(device)
+        user_cluster = user_cluster.to(device)
 
-    def score(self, users: torch.Tensor, items: torch.Tensor):
-        z_u, z_i = self.representations(users, items)
-        return (z_u * z_i).sum(dim=-1)
+        # distance to cluster center
+        dist = torch.norm(user_feature - cluster_centers[user_cluster], dim=1)  # [num_users]
 
-    def training_step(
-        self,
-        batch,
-        lambda_user: float,
-        lambda_item: float,
-        temperature: float,
-    ):
-        users, pos_items, neg_items = batch
-        users = users.to(self.user_profiles.device)
-        pos_items = pos_items.to(self.user_profiles.device)
-        neg_items = neg_items.to(self.user_profiles.device)
+        # compute sigma for each cluster
+        num_clusters = cluster_centers.size(0)
+        sigma = torch.zeros(num_clusters, device=device)
 
-        id_user, id_item, g_user, g_item = self.lightgcn.full_embeddings()
-        z_u = self._fuse_user(id_user[users], g_user[users], self.user_profiles[users])
-        z_pos = self._fuse_item(
-            id_item[pos_items], g_item[pos_items], self.item_profiles[pos_items]
-        )
-        z_neg = self._fuse_item(
-            id_item[neg_items], g_item[neg_items], self.item_profiles[neg_items]
-        )
+        for c in range(num_clusters):
+            mask = (user_cluster == c)
+            sigma[c] = dist[mask].mean()
 
-        loss = bpr_loss(z_u, z_pos, z_neg)
+        sigma_u = sigma[user_cluster]  # per-user sigma
 
-        if lambda_user > 0:
-            loss = loss + lambda_user * self.user_contrastive(users, temperature, g_user)
-        if lambda_item > 0:
-            loss = loss + lambda_item * self.item_contrastive(
-                pos_items, temperature, g_item
-            )
-        return loss
+        alpha = torch.exp(-(dist ** 2) / (2 * sigma_u ** 2 + 1e-8))  # Gaussian kernel
+        alpha = alpha.clamp(min=0.0, max=1.0)
 
-    def user_contrastive(
-        self, users: torch.Tensor, temperature: float, g_user_full: torch.Tensor
-    ):
-        anchor = g_user_full[users]
-        positive = self.user_profiles[users]
-        return info_nce(anchor, positive, temperature)
+        self.register_buffer("alpha", alpha)               # [num_users]
+        self.register_buffer("user_cluster", user_cluster) # [num_users]
 
-    def item_contrastive(
-        self, items: torch.Tensor, temperature: float, g_item_full: torch.Tensor
-    ):
-        profiles = self.item_profiles[items]
-        mask = profiles.norm(dim=-1) > 0
-        if mask.sum() <= 1:
-            return torch.tensor(0.0, device=profiles.device)
-        anchor = g_item_full[items][mask]
-        positive = profiles[mask]
-        return info_nce(anchor, positive, temperature)
+        print("[Fusion] Alpha computed. Example:", alpha[:10])
+
+    # --------------------------
+    #  Fusion forward
+    # --------------------------
+    def forward(self, users: torch.Tensor, user_g: torch.Tensor):
+        """
+        users: [B]
+        user_g: [B, embed_dim]
+        """
+
+        cid = self.user_cluster[users]           # [B]
+        cluster_vec = self.cluster_emb(cid)      # [B, 768]
+
+        # project into LightGCN space
+        cluster_proj = self.proj(cluster_vec)    # [B, embed_dim]
+        cluster_proj = self.norm(cluster_proj)
+
+        # get alpha for each user
+        alpha_u = self.alpha[users].unsqueeze(1)  # [B, 1]
+
+        # fusion
+        fused = user_g + alpha_u * cluster_proj   # [B, embed_dim]
+
+        return fused
+
 
 
 class UserClusterer:

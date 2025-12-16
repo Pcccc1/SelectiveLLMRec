@@ -226,15 +226,4 @@ class LightGCN_retrain(LightGCN):
 
         pos_g = item_g[pos_items]     # [B,d]
         neg_g = item_g[neg_items]     # [B,d]
-        u_g = self.fusion(users, u_g)
         return u_g, pos_g, neg_g
-
-
-    # -------------------- override full sort --------------------
-    @torch.no_grad()
-    def full_sort_scores(self, users: torch.Tensor) -> torch.Tensor:
-        _, _, user_g, item_g = self.get_all_embeddings()
-        u = user_g[users]
-        u = self.fuse_users(users, u)
-        scores = torch.matmul(u, item_g.t())
-        return scores

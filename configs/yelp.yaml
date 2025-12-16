@@ -9,13 +9,22 @@ data:
 lightgcn:
   embedding_dim: 64
   n_layers: 3
-train:
+pretrain:
   epochs: 1000
   batch_size: 1024
   lr: 0.001
   weight_decay: 0
   device: cuda
-  num_workers: 0
+  num_workers: 8
+  reg: 1e-4
+  save_path: checkpoints/lightgcn_best_yelp_pretrain.pth
+train:
+  epochs: 1000
+  batch_size: 1024
+  lr: 0.001
+  weight_decay: 0
+  num_workers: 8
+  device: cuda
   reg: 1e-4
   save_path: checkpoints/lightgcn_best_yelp.pth
 profile:

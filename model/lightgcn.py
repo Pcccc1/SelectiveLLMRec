@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from .model import ClusterSemanticFusion
 
 
 def _convert_sp_mat_to_sp_tensor(sp_mat) -> torch.sparse.FloatTensor:
@@ -173,4 +174,67 @@ class LightGCN(nn.Module):
 
         # [B, d] x [d, I] -> [B, I]
         scores = torch.matmul(u, i.t())
+        return scores
+    
+
+class LightGCN_retrain(LightGCN):
+    """
+    Retrain/Fine-tune version with cluster semantic fusion:
+        final_u = user_g + alpha_u * LN(Proj(cluster_emb[cid]))
+
+    Requirements:
+    - cluster_embeddings.pt: dict{cid: Tensor(768,)} OR Tensor[K,768]
+    - user_cluster.pt: Tensor[num_users] (long)
+    - alpha.pt: Tensor[num_users] (float), computed from pretrain user_feature + cluster_centers by Gaussian decay
+      (recommended: precompute offline)
+    """
+
+    def __init__(
+        self,
+        num_users: int,
+        num_items: int,
+        embedding_dim: int,
+        n_layers: int,
+        adj_mat,
+        cluster_emb: torch.Tensor | dict[int, torch.Tensor],
+        user_feature: torch.Tensor,
+        cluster_centers: torch.Tensor,
+        user_cluster: torch.Tensor,
+        device: str | torch.device = "cuda",
+    ):
+        super().__init__(num_users, num_items, embedding_dim, n_layers, adj_mat)
+        self.device = torch.device(device)
+        self.fusion = ClusterSemanticFusion(
+            embed_dim=embedding_dim,
+            cluster_emb=cluster_emb,
+            user_feature=user_feature,
+            cluster_centers=cluster_centers,
+            user_cluster=user_cluster,
+            device=device,
+        )
+
+
+    def forward(
+        self,
+        users: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+    ):
+        _, _, user_g, item_g = self.get_all_embeddings()
+        u_g = user_g[users]           # [B,d]
+        u_g = self.fusion(users, u_g)
+
+        pos_g = item_g[pos_items]     # [B,d]
+        neg_g = item_g[neg_items]     # [B,d]
+        u_g = self.fusion(users, u_g)
+        return u_g, pos_g, neg_g
+
+
+    # -------------------- override full sort --------------------
+    @torch.no_grad()
+    def full_sort_scores(self, users: torch.Tensor) -> torch.Tensor:
+        _, _, user_g, item_g = self.get_all_embeddings()
+        u = user_g[users]
+        u = self.fuse_users(users, u)
+        scores = torch.matmul(u, item_g.t())
         return scores

@@ -30,7 +30,7 @@ def set_seed(seed: int):
 def load_data(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
     set_seed(cfg.seed)
-    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(cfg.pretrain.device if torch.cuda.is_available() else "cpu")
 
 
     reader = DataReader(
@@ -55,10 +55,10 @@ def load_data(cfg_path: str):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    #wandb.init(project="SelectiveLLMRec_pretrain", config=cfg)
+    wandb.init(project="SelectiveLLMRec_pretrain", config=cfg)
     set_seed(cfg.seed)
 
-    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(cfg.pretrain.device if torch.cuda.is_available() else "cpu")
 
     print(f"Loading parser from {cfg.data.dataset}_parser.pkl")
     with open(cfg.data.dataset + "_parser.pkl", "rb") as f:
@@ -77,9 +77,9 @@ def train(cfg_path: str):
 
     loader = DataLoader(
         dataset,
-        batch_size=cfg.train.batch_size,
+        batch_size=cfg.pretrain.batch_size,
         shuffle=True,
-        num_workers=cfg.train.num_workers,
+        num_workers=cfg.pretrain.num_workers,
         collate_fn=lambda batch: collate_graph(batch, neg_sample),
     )
 
@@ -96,19 +96,19 @@ def train(cfg_path: str):
     criterion = bpr_loss
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=cfg.train.lr,
-        weight_decay=float(cfg.train.weight_decay),
+        lr=cfg.pretrain.lr,
+        weight_decay=float(cfg.pretrain.weight_decay),
     )
     
 
     best_ncdg20 = -1.0
     best_epoch = -1
-    save_path = cfg.train.save_path
+    save_path = cfg.pretrain.save_path
     os.makedirs("checkpoints", exist_ok=True)
 
     print("Starting training...")
     # step 7 : training loop
-    for epoch in range(cfg.train.epochs):
+    for epoch in range(cfg.pretrain.epochs):
         model.train()
         total_loss = 0.0
         for batch in loader:
@@ -126,7 +126,7 @@ def train(cfg_path: str):
                 z_user=user_g,
                 z_pos=pos_g,
                 z_neg=neg_g,
-                reg=float(cfg.train.reg),
+                reg=float(cfg.pretrain.reg),
                 user_id_emb=user_id_emb,
                 pos_id_emb=pos_id_emb,
                 neg_id_emb=neg_id_emb,
@@ -140,7 +140,7 @@ def train(cfg_path: str):
 
         avg_loss = total_loss / len(loader)
         wandb.log({"Loss": avg_loss})
-        print(f"Epoch {epoch+1}/{cfg.train.epochs}, Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch+1}/{cfg.pretrain.epochs}, Loss: {avg_loss:.4f}")
     
         if (epoch+1) % 10 == 0:
 
@@ -179,7 +179,7 @@ def train(cfg_path: str):
 def test(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
     set_seed(cfg.seed)
-    device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
+    device = torch.device(cfg.pretrain.device if torch.cuda.is_available() else "cpu")
 
     reader = DataReader(
         cfg.data.data_dir,
@@ -200,7 +200,7 @@ def test(cfg_path: str):
         n_layers=cfg.lightgcn.n_layers,
         adj_mat=parser.adj_mat,
     ).to(device)
-    model.load_state_dict(torch.load(cfg.train.save_path, map_location=device))
+    model.load_state_dict(torch.load(cfg.pretrain.save_path, map_location=device))
     model.eval()
 
     
@@ -209,9 +209,9 @@ def test(cfg_path: str):
     # 把 train/val 放成元组传入，并把返回的两个结果先保存为一个元组 `results`
     results = evaluate_all_ranking(
         model,
-        users=test_users,
+        users=torch.LongTensor(list(get_user_item_dict(parser.val).keys())),
         train_user_items=get_user_item_dict(parser.train),
-        eval_user_items=get_user_item_dict(parser.test),
+        eval_user_items=get_user_item_dict(parser.val),
         K=[10, 20],
         device=device,
     )
@@ -232,5 +232,5 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     load_data(args.config)
-    # train(args.config)
-    # test(args.config)
+    train(args.config)
+    test(args.config)

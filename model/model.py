@@ -5,7 +5,6 @@ from typing import Tuple
 import torch
 from torch import nn
 
-from .lightgcn import LightGCN
 from sklearn.preprocessing import normalize
 from sklearn.cluster import KMeans
 import torch.nn.functional as F
@@ -37,6 +36,7 @@ class ClusterSemanticFusion(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.device = device
+        self.fusion_scale = nn.Parameter(torch.tensor(1.0))
 
         # --------------------------
         # 1. Register cluster embedding (LLM)
@@ -58,7 +58,6 @@ class ClusterSemanticFusion(nn.Module):
         # --------------------------
         # 4. Precompute alpha (Gaussian decay)
         # --------------------------
-        print("[Fusion] Computing alpha using Gaussian distance decay...")
 
         user_feature = user_feature.to(device)
         cluster_centers = cluster_centers.to(device=device, dtype=user_feature.dtype)
@@ -112,7 +111,7 @@ class ClusterSemanticFusion(nn.Module):
         alpha_u = self.alpha[users].unsqueeze(1)  # [B, 1]
 
         # fusion
-        fused = user_g + alpha_u * cluster_proj   # [B, embed_dim]
+        fused = user_g + self.fusion_scale * alpha_u * cluster_proj   # [B, embed_dim]
 
         return fused
 

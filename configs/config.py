@@ -23,6 +23,21 @@ class LightGCNConfig:
 
 
 @dataclass
+class PretrainingConfig:
+    epochs: int = 50
+    batch_size: int = 2048
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
+    device: str = "cuda"
+    num_workers: int = 4
+    neg_samples: int = 1
+    lambda_user_cl: float = 0.1
+    lambda_item_cl: float = 0.1
+    temperature: float = 0.2
+    reg: float = 1e-4
+    save_path: Optional[str] = None
+
+@dataclass
 class TrainingConfig:
     epochs: int = 50
     batch_size: int = 2048
@@ -54,6 +69,7 @@ class ProfileConfig:
 class ExperimentConfig:
     data: DataConfig = field(default_factory=DataConfig)
     lightgcn: LightGCNConfig = field(default_factory=LightGCNConfig)
+    pretrain: PretrainingConfig = field(default_factory=PretrainingConfig)
     train: TrainingConfig = field(default_factory=TrainingConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
     seed: int = 42
@@ -66,6 +82,7 @@ class ExperimentConfig:
         return ExperimentConfig(
             data=DataConfig(**cfg_dict.get("data", {})),
             lightgcn=LightGCNConfig(**cfg_dict.get("lightgcn", {})),
+            pretrain=PretrainingConfig(**cfg_dict.get("pretrain", {})),
             train=TrainingConfig(**cfg_dict.get("train", {})),
             profile=ProfileConfig(**cfg_dict.get("profile", {})),
             seed=cfg_dict.get("seed", 42),

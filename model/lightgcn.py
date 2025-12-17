@@ -3,6 +3,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 from .model import ClusterSemanticFusion
+import numpy as np
+from scipy.sparse import diags
 
 
 def _convert_sp_mat_to_sp_tensor(sp_mat) -> torch.sparse.FloatTensor:
@@ -47,7 +49,17 @@ class LightGCN(nn.Module):
 
         # 归一化后的拉普拉斯/邻接矩阵，稀疏格式
         # 作为 buffer 注册，不参与梯度更新
-        self.register_buffer("adj_torch", _convert_sp_mat_to_sp_tensor(adj_mat))
+
+        degree = np.array(adj_mat.sum(axis=1)).flatten()
+        degree[degree == 0] = 1.0  # avoid divide-by-zero for isolated nodes
+        d_inv_sqrt = np.power(degree, -0.5, dtype=np.float32)
+        d_mat_inv_sqrt = diags(d_inv_sqrt)
+
+        # Symmetric normalized adjacency used by LightGCN: D^{-1/2} A D^{-1/2}
+        norm_adj = d_mat_inv_sqrt @ adj_mat @ d_mat_inv_sqrt
+
+
+        self.register_buffer("adj_torch", _convert_sp_mat_to_sp_tensor(norm_adj))
 
     # ------------------------------------------------------------------
     # 核心：图传播（不区分 train / eval，单纯计算 GNN embedding）

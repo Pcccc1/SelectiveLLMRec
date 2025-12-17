@@ -21,7 +21,7 @@ from model.lightgcn import LightGCN, LightGCN_retrain
 from dataloader.manager import GeneralItemProfileManager
 from utils.cluster_statistic import ClusterProfile
 from utils.cluster_encoder import ClusterEmbeddingEncoder
-
+from utils.item_node_value_evaluation import Node_value_Evaluator
 from utils.losses import bpr_loss
 from utils.metrics import evaluate_all_ranking, get_user_item_dict
 
@@ -40,7 +40,7 @@ def set_seed(seed: int):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    wandb.init(project="SelectiveLLMRec", config=cfg)
+    #wandb.init(project="SelectiveLLMRec", config=cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
@@ -48,6 +48,11 @@ def train(cfg_path: str):
     with open(f"{cfg.data.dataset}_parser.pkl", "rb") as f:
         parser = pickle.load(f)
 
+    node_evaluator = Node_value_Evaluator(
+        parser=parser,
+    )
+
+    # load item profiles
     manager = GeneralItemProfileManager(
         dataset_name=cfg.data.dataset,
         parser=parser,
@@ -75,7 +80,7 @@ def train(cfg_path: str):
 
 
     """
-    data prepare
+    data prepare for cluster profile summarization
     """
     # cluster_users = defaultdict(list)
     
@@ -130,7 +135,7 @@ def train(cfg_path: str):
     print("unexpected keys:", unexpected)
     
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=float(cfg.train.weight_decay))
 
     criterion = bpr_loss
 

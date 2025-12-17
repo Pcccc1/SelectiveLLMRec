@@ -7,3 +7,18 @@ Representative items:
 - Earl of Sandwich: Caterers, Sandwiches, Restaurants
 - MGM Grand Hotel: Restaurants, Arts & Entertainment, Hotels
 - Serendipity 3: Social Clubs, American (Traditional), Desserts
+
+
+
+You are an expert analyst for recommendation systems.
+Please summarize the preference profile of this user cluster based on their most frequently interacted items.
+
+Requirements:
+- Identify the cluster’s main interest themes.
+- Extract key categories and cuisine styles.
+- Capture stable behavioral or taste tendencies.
+- Maximum 50 words.
+- One concise paragraph only.
+
+Items:
+{item_text}

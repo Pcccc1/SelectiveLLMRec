@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from scipy.sparse import coo_matrix, diags
+from scipy.sparse import coo_matrix
 
 class GraphPretrainDataset(Dataset):
     def __init__(self, train_pairs, user_pos_items):
@@ -71,15 +71,7 @@ class GraphDatasetParser:
         N = self.num_users + self.num_items
         adj = coo_matrix((data, (row, col)), shape=(N, N), dtype=np.float32)
 
-        degree = np.array(adj.sum(axis=1)).flatten()
-        degree[degree == 0] = 1.0  # avoid divide-by-zero for isolated nodes
-        d_inv_sqrt = np.power(degree, -0.5, dtype=np.float32)
-        d_mat_inv_sqrt = diags(d_inv_sqrt)
-
-        # Symmetric normalized adjacency used by LightGCN: D^{-1/2} A D^{-1/2}
-        norm_adj = d_mat_inv_sqrt @ adj @ d_mat_inv_sqrt
-        self.adj_mat = norm_adj.tocsr()
-
+        self.adj_mat = adj.tocsr()
 
 
 def collate_graph(batch, neg_sample):

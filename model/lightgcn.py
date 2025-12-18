@@ -257,3 +257,19 @@ class LightGCN_retrain(LightGCN):
         pos_g = item_g[pos_items]     # [B,d]
         neg_g = item_g[neg_items]     # [B,d]
         return u_g, pos_g, neg_g
+
+    def predict(
+        self,
+        users: torch.Tensor,
+        items: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Override to ensure inference uses the fused user embedding, matching training.
+        """
+        user_e, item_e, user_g, item_g = self.get_all_embeddings()
+
+
+        u = self.fusion(users, user_g[users])
+        v = item_g[items]
+
+        return (u * v).sum(dim=-1)

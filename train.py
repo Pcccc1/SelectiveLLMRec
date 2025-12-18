@@ -48,10 +48,6 @@ def train(cfg_path: str):
     with open(f"{cfg.data.dataset}_parser.pkl", "rb") as f:
         parser = pickle.load(f)
 
-    node_evaluator = Node_value_Evaluator(
-        parser=parser,
-    )
-
     # load item profiles
     manager = GeneralItemProfileManager(
         dataset_name=cfg.data.dataset,
@@ -73,6 +69,21 @@ def train(cfg_path: str):
     pretrain_model.load_state_dict(torch.load(cfg.pretrain.save_path, map_location=device))
     pretrain_model.eval()
 
+    # ------------------------------------------------item
+    # get item embeddings from pre-trained model
+    with torch.no_grad():
+        item_emb_layers = pretrain_model.propagate_with_layers()
+    
+    item_id_emb = pretrain_model.item_embedding.weight.detach()
+
+    node_evaluator = Node_value_Evaluator(parser=parser, item_emb_layers=item_emb_layers, item_id_emb=item_id_emb)
+    v = node_evaluator.calculate()
+    topk = lambda x, ratio : torch.topk(x, k=int(len(x)*ratio)).indices
+    seleted_items = topk(v, ratio=cfg.train.item_top_ratio).cpu()
+    
+
+    # ------------------------------------------------user
+    # user embeddings for clustering
     with torch.no_grad():
         g_u_pretrain = pretrain_model.get_all_embeddings()[2].detach().cpu()
 

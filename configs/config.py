@@ -51,6 +51,7 @@ class TrainingConfig:
     temperature: float = 0.2
     reg: float = 1e-4
     save_path: Optional[str] = None
+    item_top_ratio: float = 0.05
 
 
 @dataclass

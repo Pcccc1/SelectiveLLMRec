@@ -15,8 +15,25 @@ def _convert_sp_mat_to_sp_tensor(sp_mat) -> torch.sparse.FloatTensor:
 
 class Node_value_Evaluator:
 
-    def __init__(self, parser):
+    def __init__(self, parser, item_emb_layers: list, item_id_emb: torch.Tensor, alpha: float = 0.33, beta: float = 0.33, gamma: float = 0.34):
         self.parser = parser
+        self.item_emb_layers = item_emb_layers
+        self.item_id_emb = item_id_emb
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
+    def calculate(self):
+        v_pr = self.get_pagerank()
+        v_un = self.get_uncertainty(self.item_emb_layers)
+        v_gp = self.get_collaborativ_structure_gap(self.item_id_emb, self.item_emb_layers[-1])
+        
+        v = (
+            self.alpha * v_pr +
+            self.beta * v_un +
+            self.gamma * v_gp
+        )
+        return v
 
 
     def get_pagerank(
@@ -63,7 +80,7 @@ class Node_value_Evaluator:
         v_pr_item = pr[self.parser.num_users:]
         minmax_norm = lambda x, eps=1e-12: (x - x.min()) / (x.max() - x.min() + eps)
         v_pr_item_norm = minmax_norm(v_pr_item)
-        self.pr_item = v_pr_item_norm
+        return v_pr_item_norm
 
 
     def get_uncertainty(self, item_emb_layers: list):
@@ -83,4 +100,28 @@ class Node_value_Evaluator:
             v_unc += torch.norm(diff, dim=1)                      # L2 per item
 
         v_unc = v_unc / num_layers
-        return v_unc
+        minmax_norm = lambda x, eps=1e-12: (x - x.min()) / (x.max() - x.min() + eps)
+        v_unc_norm = minmax_norm(v_unc)
+        return v_unc_norm
+
+
+    def get_collaborativ_structure_gap(self, item_id_emb: torch.Tensor, item_g: torch.Tensor):
+        """
+        Semantic gap between ID embedding and final GNN embedding.
+
+        Args:
+            item_id_emb: Tensor [num_items, dim]
+            item_g: Tensor [num_items, dim]
+
+        Returns:
+            v_gap: Tensor [num_items]
+        """
+        assert item_id_emb.shape == item_g.shape
+
+        # L2 distance per item
+        v_gap = torch.norm(item_id_emb - item_g, dim=1)
+        
+        minmax_norm = lambda x, eps=1e-12: (x - x.min()) / (x.max() - x.min() + eps)
+        v_gap_norm = minmax_norm(v_gap)
+
+        return v_gap_norm

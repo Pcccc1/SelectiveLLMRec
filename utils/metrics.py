@@ -67,6 +67,18 @@ def evaluate_all_ranking(
     max_K = max(K)
 
     user_g, item_g = model.propagate()
+
+    """
+    userg + user_emb
+    itemg + item_emb
+    """
+
+    # user_id = model.user_embedding.weight
+    # item_id = model.item_embedding.weight
+    # user_g = user_g + user_id
+    # item_g = item_g + item_id
+
+
     users = users.to(device)
     user_g = user_g.to(device)
     item_g = item_g.to(device)

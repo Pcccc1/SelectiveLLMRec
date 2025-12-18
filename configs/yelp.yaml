@@ -26,6 +26,7 @@ train:
   num_workers: 8
   device: cuda
   reg: 1e-4
+  item_top_ratio: 0.1
   save_path: checkpoints/lightgcn_best_yelp.pth
 profile:
   num_clusters: 200

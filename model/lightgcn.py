@@ -76,7 +76,7 @@ class LightGCN(nn.Module):
         g = all_emb
         for _ in range(self.n_layers):
             g = torch.sparse.mm(self.adj_torch, g)   # [N, d]
-            out = out + g                            # 在线累加，不存中间层
+            out = out + g 
 
         # 按论文，等价于对 (K+1) 层取平均，这里直接 / (K+1)
         out = out / (self.n_layers + 1)
@@ -86,6 +86,43 @@ class LightGCN(nn.Module):
             out, [self.num_users, self.num_items], dim=0
         )
         return user_g, item_g
+    
+
+    # Get embeddings at each layer for uncertainty estimation
+    def propagate_with_layers(self) -> list[torch.Tensor]:
+        """
+        Return item embeddings at each GNN layer (including layer 0).
+
+        Returns:
+            item_emb_layers: List[Tensor]
+                length = n_layers + 1
+                each shape = [num_items, dim]
+        """
+        # 初始 embedding（layer 0）
+        g = torch.cat(
+            [self.user_embedding.weight, self.item_embedding.weight],
+            dim=0
+        )  # [N, d]
+
+        item_layers = []
+
+        # layer 0
+        _, item_emb = torch.split(
+            g, [self.num_users, self.num_items], dim=0
+        )
+        item_layers.append(item_emb)
+
+        # layer 1 ~ L
+        for _ in range(self.n_layers):
+            g = torch.sparse.mm(self.adj_torch, g)
+
+            _, item_emb = torch.split(
+                g, [self.num_users, self.num_items], dim=0
+            )
+            item_layers.append(item_emb)
+
+        return item_layers
+
 
     # ------------------------------------------------------------------
     # Embedding 接口：方便训练/评估统一调用
@@ -167,26 +204,7 @@ class LightGCN(nn.Module):
         # 点积
         return (u * v).sum(dim=-1)
 
-    # ------------------------------------------------------------------
-    # 全排序评估：给定一批 user，对所有 item 打分
-    # ------------------------------------------------------------------
-    @torch.no_grad()
-    def full_sort_scores(self, users: torch.Tensor) -> torch.Tensor:
-        """
-        All-ranking 评估用:
-        输入:
-            users: [B]
-        返回:
-            scores: [B, num_items]，第 i 行是 user_i 对所有 item 的打分
-        """
-        _, _, user_g, item_g = self.get_all_embeddings()
 
-        u = user_g[users]          # [B, d]
-        i = item_g                 # [I, d]
-
-        # [B, d] x [d, I] -> [B, I]
-        scores = torch.matmul(u, i.t())
-        return scores
     
 
 class LightGCN_retrain(LightGCN):

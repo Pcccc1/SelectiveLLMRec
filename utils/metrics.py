@@ -92,8 +92,9 @@ def evaluate_all_ranking(
         batch_users = users[start : start + batch_size]
         batch_emb = user_g[batch_users]                 # [B, d]
         if fusion is not None:
-            batch_emb = fusion(batch_users, batch_emb)  # fuse semantic cluster info for inference
+            batch_emb, _ = fusion(batch_users, batch_emb)  # fuse semantic cluster info for inference
 
+        
         rating = torch.matmul(batch_emb, item_g.T)      # [B, I]
 
         batch_user_list = batch_users.cpu().tolist()

@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 class NegativeSampler:
     def __init__(self, num_items, user_pos_items):

@@ -10,8 +10,6 @@ import torch
 import pickle
 import json
 from collections import defaultdict
-
-
 from torch.utils.data import DataLoader
 from dataloader.data_reader import DataReader
 from dataloader.dataset_graph import GraphDatasetParser, GraphPretrainDataset, collate_graph
@@ -22,7 +20,7 @@ from dataloader.manager import GeneralItemProfileManager
 from utils.cluster_statistic import ClusterProfile
 from utils.cluster_encoder import ClusterEmbeddingEncoder
 from utils.item_node_value_evaluation import Node_value_Evaluator
-from utils.losses import bpr_loss
+from utils.losses import bpr_loss, cluster_info_nce
 from utils.metrics import evaluate_all_ranking, get_user_item_dict
 
 from prompt.cluster_summer import ClusterProfileSummarizer
@@ -40,7 +38,7 @@ def set_seed(seed: int):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    #wandb.init(project="SelectiveLLMRec", config=cfg)
+    #wandb.init(project="SelectiveLLMRec", name= "CL id emb no merge",config=cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
@@ -71,15 +69,15 @@ def train(cfg_path: str):
 
     # ------------------------------------------------item
     # get item embeddings from pre-trained model
-    with torch.no_grad():
-        item_emb_layers = pretrain_model.propagate_with_layers()
+    # with torch.no_grad():
+    #     item_emb_layers = pretrain_model.propagate_with_layers()
     
-    item_id_emb = pretrain_model.item_embedding.weight.detach()
+    # item_id_emb = pretrain_model.item_embedding.weight.detach()
 
-    node_evaluator = Node_value_Evaluator(parser=parser, item_emb_layers=item_emb_layers, item_id_emb=item_id_emb)
-    v = node_evaluator.calculate()
-    topk = lambda x, ratio : torch.topk(x, k=int(len(x)*ratio)).indices
-    seleted_items = topk(v, ratio=cfg.train.item_top_ratio).cpu()
+    # node_evaluator = Node_value_Evaluator(parser=parser, item_emb_layers=item_emb_layers, item_id_emb=item_id_emb)
+    # v = node_evaluator.calculate()
+    # topk = lambda x, ratio : torch.topk(x, k=int(len(x)*ratio)).indices
+    # seleted_items = topk(v, ratio=cfg.train.item_top_ratio).cpu()
     
 
     # ------------------------------------------------user
@@ -148,8 +146,6 @@ def train(cfg_path: str):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=float(cfg.train.weight_decay))
 
-    criterion = bpr_loss
-
     dataset = GraphPretrainDataset(
         train_pairs=parser.train,
         user_pos_items=parser.user_pos_items,
@@ -184,7 +180,9 @@ def train(cfg_path: str):
             # ------------------------------------------------
             # Forward (already fused user embedding)
             # ------------------------------------------------
-            user_g, pos_g, neg_g = model(users, pos_items, neg_items)
+            user_g, pos_g, neg_g, llm_emb = model(users, pos_items, neg_items)
+
+
 
             # ------------------------------------------------
             # ID embeddings (for L2 regularization, same as pretrain)
@@ -193,10 +191,10 @@ def train(cfg_path: str):
             pos_id_emb = model.item_embedding(pos_items)
             neg_id_emb = model.item_embedding(neg_items)
 
-            # ------------------------------------------------
-            # BPR loss (unchanged)
-            # ------------------------------------------------
-            loss = criterion(
+
+
+
+            loss_bpr = bpr_loss(
                 z_user=user_g,
                 z_pos=pos_g,
                 z_neg=neg_g,
@@ -206,6 +204,17 @@ def train(cfg_path: str):
                 neg_id_emb=neg_id_emb,
             )
 
+            user_cluster_b = user_cluster[users]
+
+            loss_info_nce = cluster_info_nce(
+                id_emb=user_id_emb,
+                llm_emb=llm_emb,
+                cluster_id=user_cluster_b,
+                temperature=0.1,
+            )
+
+            loss = loss_bpr + 0.1 * loss_info_nce
+            loss = loss_bpr
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -213,7 +222,7 @@ def train(cfg_path: str):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
-        wandb.log({"Train/Loss": avg_loss})
+        # wandb.log({"Train/Loss": avg_loss})
         print(f"[Epoch {epoch+1}/{cfg.train.epochs}] Train Loss: {avg_loss:.4f}")
 
         # ------------------------------------------------
@@ -239,12 +248,12 @@ def train(cfg_path: str):
                 f"Recall@20={recall_res[20]:.4f}, NDCG@20={ndcg_res[20]:.4f}"
             )
 
-            wandb.log({
-                "Val/Recall@10": recall_res[10],
-                "Val/NDCG@10": ndcg_res[10],
-                "Val/Recall@20": recall_res[20],
-                "Val/NDCG@20": ndcg_res[20],
-            })
+            # wandb.log({
+            #     "Val/Recall@10": recall_res[10],
+            #     "Val/NDCG@10": ndcg_res[10],
+            #     "Val/Recall@20": recall_res[20],
+            #     "Val/NDCG@20": ndcg_res[20],
+            # })
 
             # ------------------------------------------------
             # Save best model (by NDCG@20)

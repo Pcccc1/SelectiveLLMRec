@@ -94,7 +94,7 @@ class ClusterSemanticFusion(nn.Module):
     # --------------------------
     #  Fusion forward
     # --------------------------
-    def forward(self, users: torch.Tensor, user_g: torch.Tensor):
+    def forward(self, users: torch.Tensor, user_emb: torch.Tensor):
         """
         users: [B]
         user_g: [B, embed_dim]
@@ -106,14 +106,29 @@ class ClusterSemanticFusion(nn.Module):
         # project into LightGCN space
         cluster_proj = self.proj(cluster_vec)    # [B, embed_dim]
         cluster_proj = self.norm(cluster_proj)
-
+        
         # get alpha for each user
         alpha_u = self.alpha[users].unsqueeze(1)  # [B, 1]
 
         # fusion
-        fused = user_g + self.fusion_scale * alpha_u * cluster_proj   # [B, embed_dim]
+        #fused = user_emb + self.fusion_scale * alpha_u * cluster_proj   # [B, embed_dim]
 
-        return fused
+        # no fusion
+        fused = user_emb
+ 
+
+        return fused, cluster_proj
+    
+
+    def get_all_llm_emb(self):
+        """
+        Get all users' LLM-based cluster embeddings after projection and normalization.
+        """
+        cluster_vec = self.cluster_emb.weight          # [K, 1024]
+
+        all_llm_emb = cluster_vec[self.user_cluster]  # [num_users, 1024]
+
+        return all_llm_emb, self.alpha.unsqueeze(1)  
 
 
 

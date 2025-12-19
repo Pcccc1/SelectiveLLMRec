@@ -124,6 +124,7 @@ def train(cfg_path: str):
 
     cluster_embeddings = torch.load("static/cluster_embeddings.pt", map_location=device)
     cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device, dtype=g_u_pretrain.dtype)
+    print(sorted(cluster_embeddings.keys()))
     cluster_centers = torch.tensor(cluster_centers, device=device, dtype=g_u_pretrain.dtype)
     user_cluster = torch.tensor(cluster_id, device=device, dtype=torch.long)
     model = LightGCN_retrain(
@@ -214,7 +215,6 @@ def train(cfg_path: str):
             )
 
             loss = loss_bpr + 0.1 * loss_info_nce
-            loss = loss_bpr
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

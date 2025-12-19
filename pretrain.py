@@ -209,7 +209,7 @@ def test(cfg_path: str):
     # 把 train/val 放成元组传入，并把返回的两个结果先保存为一个元组 `results`
     results = evaluate_all_ranking(
         model,
-        users=torch.LongTensor(list(get_user_item_dict(parser.val).keys())),
+        users=torch.LongTensor(list(get_user_item_dict(parser.test).keys())),
         train_user_items=get_user_item_dict(parser.train),
         eval_user_items=get_user_item_dict(parser.val),
         K=[10, 20],

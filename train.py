@@ -98,17 +98,17 @@ def train(cfg_path: str):
 
     # ------------------------------------------------user
     # user embeddings for clustering
-    with torch.no_grad():
-        g_u_pretrain = pretrain_model.get_all_embeddings()[2].detach().cpu()
+    # with torch.no_grad():
+    #     g_u_pretrain = pretrain_model.get_all_embeddings()[2].detach().cpu()
 
-    cluster_id, cluster_centers = UserClusterer(num_clusters=cfg.profile.num_clusters).cluster(g_u_pretrain)
+    # cluster_id, cluster_centers = UserClusterer(num_clusters=cfg.profile.num_clusters).cluster(g_u_pretrain)
 
-    torch.save(cluster_id, "static/cluster_ids.pt")
-    torch.save(cluster_centers, "static/cluster_centers.pt")
+    # torch.save(cluster_id, "static/cluster_ids.pt")
+    # torch.save(cluster_centers, "static/cluster_centers.pt")
 
-    """
-    data prepare for cluster profile summarization
-    """
+    # """
+    # data prepare for cluster profile summarization
+    # """
     # cluster_users = defaultdict(list)
     
     # for user_idx, cid in enumerate(cluster_id):
@@ -140,9 +140,12 @@ def train(cfg_path: str):
 
     # embeddings = encoder.run()
 
+
     cluster_embeddings = torch.load("static/cluster_embeddings.pt", map_location=device)
-    cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device, dtype=g_u_pretrain.dtype)
-    cluster_centers = torch.tensor(cluster_centers, device=device, dtype=g_u_pretrain.dtype)
+    cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device)
+    cluster_centers = torch.load("static/cluster_centers.pt", map_location="device")
+    cluster_id = torch.load("static/cluster_ids.pt", map_location="device")
+    cluster_centers = torch.tensor(cluster_centers, device=device)
     user_cluster = torch.tensor(cluster_id, device=device, dtype=torch.long)
     model = LightGCN_retrain(
         num_users=parser.num_users,
@@ -156,10 +159,10 @@ def train(cfg_path: str):
         device=cfg.train.device
     ).to(device)
 
-    missing, unexpected = model.load_state_dict(pretrain_model.state_dict(), strict=False)
-    print("Model loaded.")
-    print("missing keys:", missing)
-    print("unexpected keys:", unexpected)
+    # missing, unexpected = model.load_state_dict(pretrain_model.state_dict(), strict=False)
+    # print("Model loaded.")
+    # print("missing keys:", missing)
+    # print("unexpected keys:", unexpected)
     
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=float(cfg.train.weight_decay))
@@ -242,7 +245,7 @@ def train(cfg_path: str):
         # ------------------------------------------------
         # Validation (same protocol as pretrain)
         # ------------------------------------------------
-        if (epoch + 1) % 10 != 0:
+        if (epoch + 1) % 10 == 0:
             model.eval()
             with torch.no_grad():
                 recall_res, ndcg_res = evaluate_all_ranking(

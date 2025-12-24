@@ -70,8 +70,6 @@ def evaluate_all_ranking(
 
 
     users = users.to(device)
-    user_g = user_g.to(device)
-    item_g = item_g.to(device)
 
     all_ground_truth = []
     all_pred_items = []
@@ -79,7 +77,7 @@ def evaluate_all_ranking(
     # 官方 LightGCN 评估流程：按用户 batch 计算评分，mask 训练正样本，再取 topK
     for start in range(0, users.size(0), batch_size):
         batch_users = users[start : start + batch_size]
-        batch_emb = user_g[batch_users]                 # [B, d]
+        batch_emb = user_g[start : start + batch_size]
         
         rating = torch.matmul(batch_emb, item_g.T)      # [B, I]
 

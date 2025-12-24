@@ -22,10 +22,12 @@ from utils.cluster_encoder import ClusterEmbeddingEncoder
 from utils.item_node_value_evaluation import Node_value_Evaluator
 from utils.losses import bpr_loss, cluster_info_nce
 from utils.metrics import evaluate_all_ranking, get_user_item_dict
+from utils.item_encoder import ItemEmbeddingEncoder
 
 from prompt.cluster_summer import ClusterProfileSummarizer
+from prompt.item_profile_gen import ItemProfileGenerator
 
-from model.model import UserClusterer, ClusterSemanticFusion
+from model.fusion import UserClusterer
 
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
@@ -38,7 +40,7 @@ def set_seed(seed: int):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    #wandb.init(project="SelectiveLLMRec", name= "CL id emb no merge",config=cfg)
+    wandb.init(project="SelectiveLLMRec", name= "concat",config=cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
@@ -78,6 +80,20 @@ def train(cfg_path: str):
     # v = node_evaluator.calculate()
     # topk = lambda x, ratio : torch.topk(x, k=int(len(x)*ratio)).indices
     # seleted_items = topk(v, ratio=cfg.train.item_top_ratio).cpu()
+    # generator = ItemProfileGenerator(
+    #     item_profiles=item_profiles,
+    #     selected_items=seleted_items,
+    # )
+    # generator.generate_item_profiles_llm(save_path="static/item_topk_profiles.json")
+
+    # item_encoder = ItemEmbeddingEncoder(
+    #     profile_json_path="static/item_topk_profiles.json",
+    #     save_path="static/item_profile_embeddings.pt",
+    #     device=device,
+    # )
+    # item_encoder.run()
+    item_profile_embeddings = torch.load("static/item_profile_embeddings.pt", map_location=device)
+
     
 
     # ------------------------------------------------user
@@ -124,7 +140,6 @@ def train(cfg_path: str):
 
     cluster_embeddings = torch.load("static/cluster_embeddings.pt", map_location=device)
     cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device, dtype=g_u_pretrain.dtype)
-    print(sorted(cluster_embeddings.keys()))
     cluster_centers = torch.tensor(cluster_centers, device=device, dtype=g_u_pretrain.dtype)
     user_cluster = torch.tensor(cluster_id, device=device, dtype=torch.long)
     model = LightGCN_retrain(
@@ -134,11 +149,11 @@ def train(cfg_path: str):
         n_layers=cfg.lightgcn.n_layers,
         adj_mat=parser.adj_mat,
         cluster_emb=cluster_emb,
-        cluster_centers=cluster_centers,
         user_cluster=user_cluster,
-        user_feature=g_u_pretrain,
+        item_profile_embeddings=item_profile_embeddings,
         device=cfg.train.device
     ).to(device)
+
     missing, unexpected = model.load_state_dict(pretrain_model.state_dict(), strict=False)
     print("Model loaded.")
     print("missing keys:", missing)
@@ -181,9 +196,7 @@ def train(cfg_path: str):
             # ------------------------------------------------
             # Forward (already fused user embedding)
             # ------------------------------------------------
-            user_g, pos_g, neg_g, llm_emb = model(users, pos_items, neg_items)
-
-
+            user_g, pos_g, neg_g = model(users, pos_items, neg_items)
 
             # ------------------------------------------------
             # ID embeddings (for L2 regularization, same as pretrain)
@@ -191,8 +204,6 @@ def train(cfg_path: str):
             user_id_emb = model.user_embedding(users)
             pos_id_emb = model.item_embedding(pos_items)
             neg_id_emb = model.item_embedding(neg_items)
-
-
 
 
             loss_bpr = bpr_loss(
@@ -205,16 +216,17 @@ def train(cfg_path: str):
                 neg_id_emb=neg_id_emb,
             )
 
-            user_cluster_b = user_cluster[users]
+            # user_cluster_b = user_cluster[users]
 
-            loss_info_nce = cluster_info_nce(
-                id_emb=user_id_emb,
-                llm_emb=llm_emb,
-                cluster_id=user_cluster_b,
-                temperature=0.1,
-            )
+            # loss_info_nce = cluster_info_nce(
+            #     id_emb=user_id_emb,
+            #     llm_emb=llm_emb,
+            #     cluster_id=user_cluster_b,
+            #     temperature=0.1,
+            # )
 
-            loss = loss_bpr + 0.1 * loss_info_nce
+            #loss = loss_bpr + 0.25 * loss_info_nce
+            loss = loss_bpr
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -222,13 +234,13 @@ def train(cfg_path: str):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
-        # wandb.log({"Train/Loss": avg_loss})
+        wandb.log({"Train/Loss": avg_loss})
         print(f"[Epoch {epoch+1}/{cfg.train.epochs}] Train Loss: {avg_loss:.4f}")
 
         # ------------------------------------------------
         # Validation (same protocol as pretrain)
         # ------------------------------------------------
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 10 != 0:
             model.eval()
             with torch.no_grad():
                 recall_res, ndcg_res = evaluate_all_ranking(
@@ -248,12 +260,12 @@ def train(cfg_path: str):
                 f"Recall@20={recall_res[20]:.4f}, NDCG@20={ndcg_res[20]:.4f}"
             )
 
-            # wandb.log({
-            #     "Val/Recall@10": recall_res[10],
-            #     "Val/NDCG@10": ndcg_res[10],
-            #     "Val/Recall@20": recall_res[20],
-            #     "Val/NDCG@20": ndcg_res[20],
-            # })
+            wandb.log({
+                "Val/Recall@10": recall_res[10],
+                "Val/NDCG@10": ndcg_res[10],
+                "Val/Recall@20": recall_res[20],
+                "Val/NDCG@20": ndcg_res[20],
+            })
 
             # ------------------------------------------------
             # Save best model (by NDCG@20)

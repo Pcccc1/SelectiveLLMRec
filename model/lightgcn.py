@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-from .model import ClusterSemanticFusion
+from .fusion import FusionHead
 import numpy as np
 from scipy.sparse import diags
+import torch.nn.functional as F
 
 
 def _convert_sp_mat_to_sp_tensor(sp_mat) -> torch.sparse.FloatTensor:
@@ -39,6 +40,7 @@ class LightGCN(nn.Module):
         self.num_users = num_users
         self.num_items = num_items
         self.n_layers = n_layers
+        self.embedding_dim = embedding_dim
 
         # ID embedding
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
@@ -227,21 +229,32 @@ class LightGCN_retrain(LightGCN):
         n_layers: int,
         adj_mat,
         cluster_emb: torch.Tensor | dict[int, torch.Tensor],
-        user_feature: torch.Tensor,
-        cluster_centers: torch.Tensor,
         user_cluster: torch.Tensor,
+        item_profile_embeddings: dict[int, torch.Tensor] | torch.Tensor,
         device: str | torch.device = "cuda",
     ):
         super().__init__(num_users, num_items, embedding_dim, n_layers, adj_mat)
         self.device = torch.device(device)
-        self.fusion = ClusterSemanticFusion(
-            embed_dim=embedding_dim,
-            cluster_emb=cluster_emb,
-            user_feature=user_feature,
-            cluster_centers=cluster_centers,
-            user_cluster=user_cluster,
-            device=device,
-        )
+        self.fusion_head = FusionHead(embedding_dim, user_cluster, cluster_emb)
+        self.item_profile_embeddings = item_profile_embeddings
+
+        self.register_buffer('cluster_emb', cluster_emb)
+
+        item_llm_emb = torch.zeros((num_items, 1024), device=self.device)
+        item_llm_mask = torch.zeros((num_items, 1), device=self.device)
+        for iid, emb in self.item_profile_embeddings.items():
+            item_llm_emb[iid] = emb.to(self.device)
+            item_llm_mask[iid] = 1.0
+
+        self.register_buffer('item_llm_emb', item_llm_emb)
+        self.register_buffer('item_llm_mask', item_llm_mask)
+        
+
+    def build_llm_items_embedings(self, item_ids, device):
+        llm_emb = self.item_llm_emb[item_ids].to(device)      # [B,d]
+        mask = self.item_llm_mask[item_ids].to(device)        # [B,1]
+        return llm_emb, mask
+
 
     def forward(
         self,
@@ -255,22 +268,60 @@ class LightGCN_retrain(LightGCN):
         pos_g = item_g[pos_items]     # [B,d]
         neg_g = item_g[neg_items]     # [B,d]
         # fusion
-        u_g, llm_emb = self.fusion(users, u_g)
+        u_g = self.fusion_head.fusion_user(users, u_g)
 
-        return u_g, pos_g, neg_g, llm_emb
+        pos_llm, pos_mask = self.build_llm_items_embedings(pos_items, pos_g.device)
+        pos_final = self.fusion_head.fusion_item(pos_g, pos_llm, pos_mask)
 
-    # def predict(
-    #     self,
-    #     users: torch.Tensor,
-    #     items: torch.Tensor,
-    # ) -> torch.Tensor:
-    #     """
-    #     Override to ensure inference uses the fused user embedding, matching training.
-    #     """
-    #     user_e, item_e, user_g, item_g = self.get_all_embeddings()
+        neg_llm, neg_mask = self.build_llm_items_embedings(neg_items, pos_g.device)
+        neg_final = self.fusion_head.fusion_item(neg_g, neg_llm, neg_mask)
 
+        u_g = F.normalize(u_g, dim=-1)
+        pos_final = F.normalize(pos_final, dim=-1)
+        neg_final = F.normalize(neg_final, dim=-1)
 
-    #     u = self.fusion(users, user_g[users])
-    #     v = item_g[items]
+        return u_g, pos_final, neg_final
+    
 
-    #     return (u * v).sum(dim=-1)
+    @torch.no_grad()
+    def predict(self, users: torch.Tensor):
+
+        self.eval()
+
+        user_e, item_e, user_g, item_g = self.get_all_embeddings()
+        device = self.device
+
+        # ---------- user ----------
+        u_g = user_g[users]                       # [B, d]
+        u_final = self.fusion_head.fusion_user(
+            users,
+            u_g
+        )                                         # [B, d]
+
+        # ---------- item (ALL items) ----------
+        num_items = self.num_items
+        all_item_ids = torch.arange(
+            num_items, device=device, dtype=torch.long
+        )
+
+        item_g_all = item_g                       # [num_items, d]
+
+        # build llm emb + mask for all items
+        item_llm, item_mask = self.build_llm_items_embedings(
+            all_item_ids,
+            device
+        )                                         # [num_items, 768], [num_items, 1]
+
+        item_final = self.fusion_head.fusion_item(
+            item_g_all,
+            item_llm,
+            item_mask
+        )                                         # [num_items, d]
+
+        # ---------- normalize ----------
+        u_final = F.normalize(u_final, dim=-1)
+        item_final = F.normalize(item_final, dim=-1)
+
+        return u_final, item_final
+
+    

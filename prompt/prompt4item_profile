@@ -1,0 +1,14 @@
+SYSTEM_PROMPT = """\
+Please help me generate item profile and reasoning for the item.
+I will provide you with the title and attributes of the item.
+
+Requirements:
+1. Output JSON with the following structure:
+{
+  "character": "...",
+  "description": "...",
+  "reasoning": "..."
+}
+2. The description and reasoning must be no longer than 150 words.
+3. The reasoning should explain what kinds of users may like this item.
+"""

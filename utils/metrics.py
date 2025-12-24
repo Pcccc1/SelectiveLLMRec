@@ -66,18 +66,7 @@ def evaluate_all_ranking(
     model.eval()
     max_K = max(K)
 
-    user_g, item_g = model.propagate()
-    fusion = getattr(model, "fusion", None)  # optionally fuse user embedding (LightGCN_retrain)
-
-    """
-    userg + user_emb
-    itemg + item_emb
-    """
-
-    # user_id = model.user_embedding.weight
-    # item_id = model.item_embedding.weight
-    # user_g = user_g + user_id
-    # item_g = item_g + item_id
+    user_g, item_g = model.predict(users)
 
 
     users = users.to(device)
@@ -91,9 +80,6 @@ def evaluate_all_ranking(
     for start in range(0, users.size(0), batch_size):
         batch_users = users[start : start + batch_size]
         batch_emb = user_g[batch_users]                 # [B, d]
-        if fusion is not None:
-            batch_emb, _ = fusion(batch_users, batch_emb)  # fuse semantic cluster info for inference
-
         
         rating = torch.matmul(batch_emb, item_g.T)      # [B, I]
 

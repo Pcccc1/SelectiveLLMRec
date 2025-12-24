@@ -19,7 +19,6 @@ class ClusterProfileSummarizer:
     def __init__(
         self,
         llama_url: str = "http://127.0.0.1:8080/v1/chat/completions",
-        embedding_model_name: str = "BAAI/bge-large-en-v1.5",
         cache_dir: str = "./cache/cluster_profiles",
         max_tokens: int = 128,
         temperature: float = 0.2,
@@ -131,13 +130,9 @@ Final summary:
         # 3. Query llama.cpp server
         summary = self.llama_query(prompt)
 
-        # 4. Generate embedding
-        # embedding = self.encode_summary(summary)
-
         result = {
             "cluster_id": cluster_id,
             "summary": summary,
-            # "embedding": embedding,
         }
 
         # Save cache

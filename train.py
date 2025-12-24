@@ -103,6 +103,8 @@ def train(cfg_path: str):
 
     cluster_id, cluster_centers = UserClusterer(num_clusters=cfg.profile.num_clusters).cluster(g_u_pretrain)
 
+    torch.save(cluster_id, "static/cluster_ids.pt")
+    torch.save(cluster_centers, "static/cluster_centers.pt")
 
     """
     data prepare for cluster profile summarization

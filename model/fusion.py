@@ -24,9 +24,9 @@ class UserClusterer:
 class FusionHead(nn.Module):
     def __init__(self, dim: int, user_cluster: torch.Tensor, cluster_emb: torch.Tensor):
         super().__init__()
-
-        self.user_cluster = user_cluster   # [num_users]
-        self.cluster_emb = cluster_emb
+        
+        self.register_buffer('cluster_emb', cluster_emb)
+        self.register_buffer('user_cluster', user_cluster) 
 
         self.proj_u = nn.Sequential(
             nn.Linear(cluster_emb.size(1), 256),

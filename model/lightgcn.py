@@ -180,30 +180,31 @@ class LightGCN(nn.Module):
     def predict(
         self,
         users: torch.Tensor,
-        items: torch.Tensor,
+        items: torch.Tensor | None = None,
         use_graph_embedding: bool = True,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
-        预测一批 (user, item) pair 的偏好得分。
-
-        输入:
-            users: [B]
-            items: [B] 或 [B, K] (后者一般自己写广播或展开)
-            use_graph_embedding: True 时用 GNN embedding，否则用 ID embedding
-
-        返回:
-            scores: [B] 对应 user-item 的打分
+        统一推理接口：
+        1) items is None: 返回 (batch_user_emb, all_item_emb)，用于 full-ranking 评估
+        2) items is not None: 返回 (user, item) pair 的点积得分
         """
         user_e, item_e, user_g, item_g = self.get_all_embeddings()
 
         if use_graph_embedding:
-            u = user_g[users]
-            v = item_g[items]
+            all_user_emb, all_item_emb = user_g, item_g
         else:
-            u = user_e[users]
-            v = item_e[items]
+            all_user_emb, all_item_emb = user_e, item_e
 
-        # 点积
+        users = users.to(all_user_emb.device)
+
+        # full ranking path
+        if items is None:
+            return all_user_emb[users], all_item_emb
+
+        # pair scoring path
+        items = items.to(all_item_emb.device)
+        u = all_user_emb[users]
+        v = all_item_emb[items]
         return (u * v).sum(dim=-1)
 
 
@@ -276,9 +277,6 @@ class LightGCN_retrain(LightGCN):
         neg_llm, neg_mask = self.build_llm_items_embedings(neg_items, pos_g.device)
         neg_final = self.fusion_head.fusion_item(neg_g, neg_llm, neg_mask)
 
-        u_g = F.normalize(u_g, dim=-1)
-        pos_final = F.normalize(pos_final, dim=-1)
-        neg_final = F.normalize(neg_final, dim=-1)
 
         return u_g, pos_final, neg_final
     
@@ -317,11 +315,7 @@ class LightGCN_retrain(LightGCN):
             item_llm,
             item_mask
         )                                         # [num_items, d]
-
-        # ---------- normalize ----------
-        u_final = F.normalize(u_final, dim=-1)
-        item_final = F.normalize(item_final, dim=-1)
-
+        
         return u_final, item_final
 
     

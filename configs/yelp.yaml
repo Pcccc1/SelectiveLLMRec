@@ -20,7 +20,7 @@ pretrain:
   save_path: checkpoints/lightgcn_best_yelp_pretrain.pth
 train:
   epochs: 1000
-  batch_size: 2048
+  batch_size: 1024
   lr: 0.0001
   weight_decay: 0
   num_workers: 8

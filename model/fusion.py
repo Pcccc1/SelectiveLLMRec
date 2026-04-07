@@ -51,8 +51,8 @@ class FusionHead(nn.Module):
         self.gate_i = nn.Linear(2 * dim, 1)
 
         # 关键初始化：让模型一开始 ≈ 原 GNN
-        nn.init.zeros_(self.mlp_i[-1].weight)
-        nn.init.zeros_(self.mlp_i[-1].bias)
+        # nn.init.zeros_(self.mlp_i[-1].weight)
+        # nn.init.zeros_(self.mlp_i[-1].bias)
 
         self.mlp_u = nn.Sequential(
             nn.Linear(2 * dim, dim),
@@ -62,9 +62,13 @@ class FusionHead(nn.Module):
 
         self.gate_u = nn.Linear(2 * dim, 1)
 
+
+        self.scale_i = nn.Parameter(torch.tensor(0.5))
+        self.scale_u = nn.Parameter(torch.tensor(0.5))
+
         # 关键初始化：让模型一开始 ≈ 原 GNN
-        nn.init.zeros_(self.mlp_u[-1].weight)
-        nn.init.zeros_(self.mlp_u[-1].bias)
+        # nn.init.zeros_(self.mlp_u[-1].weight)
+        # nn.init.zeros_(self.mlp_u[-1].bias)
 
 
 
@@ -75,12 +79,16 @@ class FusionHead(nn.Module):
         mask: torch.Tensor          # [B, 1]  (0 or 1)
     ):
         llm_emb = self.proj_i(llm_emb)        # [B, d]
-        x = torch.cat([gnn_emb, llm_emb], dim=-1)
+        #x = torch.cat([gnn_emb, llm_emb], dim=-1)
+        x = gnn_emb + self.scale_i * self.mlp_i(torch.cat([gnn_emb, llm_emb], dim=-1))
+        
 
-        delta = self.mlp_i(x)                       # [B, d]
-        alpha = torch.sigmoid(self.gate_i(x))       # [B, 1]
+        #delta = self.mlp_i(x)                       # [B, d]
+        #alpha = torch.sigmoid(self.gate_i(x))       # [B, 1]
 
-        out = gnn_emb + mask * alpha * delta
+        #out = gnn_emb + mask * alpha * delta
+
+        out = x
         return out
 
 
@@ -96,11 +104,14 @@ class FusionHead(nn.Module):
         # project into LightGCN space
         cluster_proj = self.proj_u(cluster_vec)  # [B, embed_dim]
 
-        fused = torch.cat([user_emb, cluster_proj], dim=-1) # [B, embed_dim * 2]
+        #fused = torch.cat([user_emb, cluster_proj], dim=-1) # [B, embed_dim * 2]
+        fused = user_emb + self.scale_u * self.mlp_u(torch.cat([user_emb, cluster_proj], dim=-1))
 
-        delta = self.mlp_u(fused)                       # [B, d]
-        alpha = torch.sigmoid(self.gate_u(fused))       # [B,
+        #delta = self.mlp_u(fused)                       # [B, d]
+        #alpha = torch.sigmoid(self.gate_u(fused))       # [B,
 
-        out = user_emb + alpha * delta
+        #out = user_emb + alpha * delta
+
+        out = fused
         
         return out

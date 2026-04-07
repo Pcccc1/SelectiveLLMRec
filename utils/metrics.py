@@ -95,7 +95,7 @@ def evaluate_all_ranking(
             gt = eval_user_items.get(u)
             if not gt:
                 continue
-            all_ground_truth.append(list(gt))
+            all_ground_truth.append((gt))
             all_pred_items.append(topk_items[row])
 
     if len(all_ground_truth) == 0:

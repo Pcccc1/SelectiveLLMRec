@@ -40,7 +40,7 @@ def set_seed(seed: int):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    wandb.init(project="SelectiveLLMRec", name= "concat",config=cfg)
+    #wandb.init(project="SelectiveLLMRec", name= "reconstruct",config=cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.train.device if torch.cuda.is_available() else "cpu")
@@ -54,7 +54,7 @@ def train(cfg_path: str):
         parser=parser,
         profile_path=cfg.data.profile_path,
     )
-    item_profiles = manager.load(format="yelp")
+    item_profiles = manager.load(format=cfg.data.dataset)
     parser.item_profiles = item_profiles
     print(f"Loaded {len(item_profiles)} item profiles.")
 
@@ -143,8 +143,8 @@ def train(cfg_path: str):
 
     cluster_embeddings = torch.load("static/cluster_embeddings.pt", map_location=device)
     cluster_emb = torch.stack([cluster_embeddings[c] for c in sorted(cluster_embeddings.keys())]).to(device=device)
-    cluster_centers = torch.load("static/cluster_centers.pt", map_location="device")
-    cluster_id = torch.load("static/cluster_ids.pt", map_location="device")
+    cluster_centers = torch.load("static/cluster_centers.pt", map_location=device)
+    cluster_id = torch.load("static/cluster_ids.pt", map_location=device)
     cluster_centers = torch.tensor(cluster_centers, device=device)
     user_cluster = torch.tensor(cluster_id, device=device, dtype=torch.long)
     model = LightGCN_retrain(
@@ -159,10 +159,10 @@ def train(cfg_path: str):
         device=cfg.train.device
     ).to(device)
 
-    # missing, unexpected = model.load_state_dict(pretrain_model.state_dict(), strict=False)
-    # print("Model loaded.")
-    # print("missing keys:", missing)
-    # print("unexpected keys:", unexpected)
+    missing, unexpected = model.load_state_dict(pretrain_model.state_dict(), strict=False)
+    print("Model loaded.")
+    print("missing keys:", missing)
+    print("unexpected keys:", unexpected)
     
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=float(cfg.train.weight_decay))
@@ -198,9 +198,6 @@ def train(cfg_path: str):
             pos_items = batch["pos"].to(device)
             neg_items = batch["neg"].to(device)
 
-            # ------------------------------------------------
-            # Forward (already fused user embedding)
-            # ------------------------------------------------
             user_g, pos_g, neg_g = model(users, pos_items, neg_items)
 
             # ------------------------------------------------
@@ -239,13 +236,13 @@ def train(cfg_path: str):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
-        wandb.log({"Train/Loss": avg_loss})
+        #wandb.log({"Train/Loss": avg_loss})
         print(f"[Epoch {epoch+1}/{cfg.train.epochs}] Train Loss: {avg_loss:.4f}")
 
         # ------------------------------------------------
         # Validation (same protocol as pretrain)
         # ------------------------------------------------
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 10 != 0:
             model.eval()
             with torch.no_grad():
                 recall_res, ndcg_res = evaluate_all_ranking(
@@ -254,7 +251,7 @@ def train(cfg_path: str):
                         list(get_user_item_dict(parser.val).keys())
                     ).to(device),
                     train_user_items=get_user_item_dict(parser.train),
-                    eval_user_items=get_user_item_dict(parser.val),
+                    eval_user_items=(get_user_item_dict(parser.val)),
                     K=[10, 20],
                     device=device,
                 )
@@ -265,12 +262,12 @@ def train(cfg_path: str):
                 f"Recall@20={recall_res[20]:.4f}, NDCG@20={ndcg_res[20]:.4f}"
             )
 
-            wandb.log({
-                "Val/Recall@10": recall_res[10],
-                "Val/NDCG@10": ndcg_res[10],
-                "Val/Recall@20": recall_res[20],
-                "Val/NDCG@20": ndcg_res[20],
-            })
+            # wandb.log({
+            #     "Val/Recall@10": recall_res[10],
+            #     "Val/NDCG@10": ndcg_res[10],
+            #     "Val/Recall@20": recall_res[20],
+            #     "Val/NDCG@20": ndcg_res[20],
+            # })
 
             # ------------------------------------------------
             # Save best model (by NDCG@20)
@@ -298,7 +295,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/yelp.yaml",
+        default="configs/movie.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

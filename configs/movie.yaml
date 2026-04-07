@@ -1,21 +1,30 @@
 seed: 42
 data:
   dataset: movie
-  data_dir: datasets/movielens_1m/movielens_1m_processed
-  profile_path: datasets/movielens_1m/movielens_1m_processed/item_profile.json
+  data_dir: datasets/movielens_1m/
+  profile_path: datasets/movielens_1m/item_profile.json
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
   n_layers: 3
+pretrain:
+  epochs: 1000
+  batch_size: 1024
+  lr: 0.001
+  weight_decay: 0
+  device: cuda
+  num_workers: 8
+  reg: 1e-4
+  save_path: checkpoints/lightgcn_best_movie_pretrain.pth
 train:
   epochs: 1000
   batch_size: 1024
   lr: 0.001
   weight_decay: 0
   device: cuda
-  num_workers: 0
+  num_workers: 8
   reg: 1e-4
   save_path: checkpoints/lightgcn_best_movie.pth
 profile:

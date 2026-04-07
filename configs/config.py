@@ -7,7 +7,7 @@ import yaml
 
 @dataclass
 class DataConfig:
-    dataset: str = "yelp"
+    dataset: str = "movie"
     data_dir: str = "data"
     min_user_interactions: int = 5
     min_item_interactions: int = 5

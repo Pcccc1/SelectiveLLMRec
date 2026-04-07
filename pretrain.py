@@ -211,7 +211,7 @@ def test(cfg_path: str):
         model,
         users=torch.LongTensor(list(get_user_item_dict(parser.test).keys())),
         train_user_items=get_user_item_dict(parser.train),
-        eval_user_items=get_user_item_dict(parser.val),
+        eval_user_items=get_user_item_dict(parser.test),
         K=[10, 20],
         device=device,
     )
@@ -227,7 +227,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/yelp.yaml",
+        default="configs/movie.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

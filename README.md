@@ -30,3 +30,11 @@ Required columns:
 
 
 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
+
+
+dist_u = || g_u_pretrain[u] - center[cid] ||
+sigma_c = mean(dist for all users in cluster c)
+alpha_u = exp( - dist_u² / (2σ_c²) )
+
+cluster_proj = LayerNorm( W * cluster_emb[cid] )
+final_u = g_u + alpha_u * cluster_proj

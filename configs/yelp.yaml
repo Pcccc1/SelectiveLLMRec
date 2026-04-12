@@ -1,8 +1,8 @@
 seed: 42
 data:
   dataset: yelp
-  profile_path: datasets/yelp/item_profile.json
-  data_dir: datasets/yelp/
+  profile_path: data_new/yelp/itm_prf.pkl
+  data_dir: data_new/yelp
   min_user_interactions: 5
   min_item_interactions: 5
   recency_half_life: 30.0

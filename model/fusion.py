@@ -3,22 +3,6 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from sklearn.preprocessing import normalize
-from sklearn.cluster import KMeans
-
-
-class UserClusterer:
-    def __init__(self, num_clusters=100):   
-        self.num_clusters = num_clusters
-    
-    def cluster(self, user_g):
-        emb = user_g.detach().cpu().numpy()
-        emb = normalize(emb, norm='l2')
-        kmeans = KMeans(n_clusters=self.num_clusters, random_state=42, n_init='auto')
-        cluster_ids = kmeans.fit_predict(emb)
-
-        return cluster_ids, kmeans.cluster_centers_
-
 
 
 class FusionHead(nn.Module):
@@ -36,7 +20,7 @@ class FusionHead(nn.Module):
         )
 
         self.proj_i = nn.Sequential(
-            nn.Linear(1024, 256),
+            nn.Linear(1536, 256),
             nn.ReLU(),
             nn.Linear(256, dim),
             nn.LayerNorm(dim),
@@ -48,27 +32,14 @@ class FusionHead(nn.Module):
             nn.Linear(dim, dim),
         )
 
-        self.gate_i = nn.Linear(2 * dim, 1)
-
-        # 关键初始化：让模型一开始 ≈ 原 GNN
-        # nn.init.zeros_(self.mlp_i[-1].weight)
-        # nn.init.zeros_(self.mlp_i[-1].bias)
-
         self.mlp_u = nn.Sequential(
             nn.Linear(2 * dim, dim),
             nn.ReLU(),
             nn.Linear(dim, dim),
         )
 
-        self.gate_u = nn.Linear(2 * dim, 1)
-
-
         self.scale_i = nn.Parameter(torch.tensor(0.5))
         self.scale_u = nn.Parameter(torch.tensor(0.5))
-
-        # 关键初始化：让模型一开始 ≈ 原 GNN
-        # nn.init.zeros_(self.mlp_u[-1].weight)
-        # nn.init.zeros_(self.mlp_u[-1].bias)
 
 
 
@@ -79,17 +50,8 @@ class FusionHead(nn.Module):
         mask: torch.Tensor          # [B, 1]  (0 or 1)
     ):
         llm_emb = self.proj_i(llm_emb)        # [B, d]
-        #x = torch.cat([gnn_emb, llm_emb], dim=-1)
         x = gnn_emb + self.scale_i * self.mlp_i(torch.cat([gnn_emb, llm_emb], dim=-1))
-        
-
-        #delta = self.mlp_i(x)                       # [B, d]
-        #alpha = torch.sigmoid(self.gate_i(x))       # [B, 1]
-
-        #out = gnn_emb + mask * alpha * delta
-
-        out = x
-        return out
+        return x
 
 
     def fusion_user(self, users: torch.Tensor, user_emb: torch.Tensor):
@@ -101,17 +63,47 @@ class FusionHead(nn.Module):
         cid = self.user_cluster[users]           # [B]
         cluster_vec = self.cluster_emb[cid]      # [B, 768]
 
-        # project into LightGCN space
         cluster_proj = self.proj_u(cluster_vec)  # [B, embed_dim]
-
-        #fused = torch.cat([user_emb, cluster_proj], dim=-1) # [B, embed_dim * 2]
         fused = user_emb + self.scale_u * self.mlp_u(torch.cat([user_emb, cluster_proj], dim=-1))
+        return fused
 
-        #delta = self.mlp_u(fused)                       # [B, d]
-        #alpha = torch.sigmoid(self.gate_u(fused))       # [B,
 
-        #out = user_emb + alpha * delta
+class ItemSemanticFusionHead(nn.Module):
+    """
+    Conservative item-only semantic fusion:
+        z = g + mask * alpha * delta
+    """
 
-        out = fused
-        
-        return out
+    def __init__(self, gnn_dim: int, semantic_dim: int, hidden_dim: int = 256):
+        super().__init__()
+        self.projector = nn.Sequential(
+            nn.Linear(semantic_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, gnn_dim),
+            nn.LayerNorm(gnn_dim),
+        )
+        self.delta_mlp = nn.Sequential(
+            nn.Linear(gnn_dim * 2, gnn_dim),
+            nn.ReLU(),
+            nn.Linear(gnn_dim, gnn_dim),
+        )
+        self.gate = nn.Linear(gnn_dim * 2, 1)
+
+        # Start close to identity mapping.
+        nn.init.zeros_(self.delta_mlp[-1].weight)
+        nn.init.zeros_(self.delta_mlp[-1].bias)
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, -3.0)
+
+    def forward(
+        self,
+        gnn_emb: torch.Tensor,      # [B, d]
+        semantic_emb: torch.Tensor, # [B, ds]
+        selected_mask: torch.Tensor # [B, 1], 0/1
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        sem_proj = self.projector(semantic_emb)
+        x = torch.cat([gnn_emb, sem_proj], dim=-1)
+        delta = self.delta_mlp(x)
+        alpha = torch.sigmoid(self.gate(x))
+        fused = gnn_emb + selected_mask * alpha * delta
+        return fused, sem_proj, alpha

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-from .fusion import FusionHead
+from .fusion import FusionHead, ItemSemanticFusionHead
 import numpy as np
 from scipy.sparse import diags
 import torch.nn.functional as F
@@ -241,10 +241,24 @@ class LightGCN_retrain(LightGCN):
 
         self.register_buffer('cluster_emb', cluster_emb)
 
-        item_llm_emb = torch.zeros((num_items, 1024), device=self.device)
+        item_llm_emb = torch.zeros((num_items, 1536), device=self.device)
         item_llm_mask = torch.zeros((num_items, 1), device=self.device)
-        for iid, emb in self.item_profile_embeddings.items():
-            item_llm_emb[iid] = emb.to(self.device)
+        if isinstance(self.item_profile_embeddings, dict):
+            embedding_iter = self.item_profile_embeddings.items()
+        else:
+            embedding_iter = enumerate(self.item_profile_embeddings)
+
+        for iid, emb in embedding_iter:
+            iid = int(iid)
+            if iid < 0 or iid >= num_items:
+                continue
+
+            if not torch.is_tensor(emb):
+                emb = torch.as_tensor(emb)
+            emb = emb.to(self.device).view(-1)
+
+            copy_dim = min(item_llm_emb.size(1), emb.numel())
+            item_llm_emb[iid, :copy_dim] = emb[:copy_dim]
             item_llm_mask[iid] = 1.0
 
         self.register_buffer('item_llm_emb', item_llm_emb)
@@ -319,3 +333,99 @@ class LightGCN_retrain(LightGCN):
         return u_final, item_final
 
     
+
+class LightGCNBudgetedSemantic(LightGCN):
+    """
+    Item-only budgeted semantic acquisition model.
+
+    - Users keep collaborative embeddings from LightGCN.
+    - Items receive semantic residual corrections only when selected mask == 1.
+    """
+
+    def __init__(
+        self,
+        num_users: int,
+        num_items: int,
+        embedding_dim: int,
+        n_layers: int,
+        adj_mat,
+        item_semantic_embeddings: dict[int, torch.Tensor] | torch.Tensor,
+        selected_item_mask: torch.Tensor,
+        semantic_dim: int,
+        device: str | torch.device = "cuda",
+    ):
+        super().__init__(num_users, num_items, embedding_dim, n_layers, adj_mat)
+        self.device = torch.device(device)
+        self.semantic_dim = int(semantic_dim)
+        self.item_fusion = ItemSemanticFusionHead(gnn_dim=embedding_dim, semantic_dim=self.semantic_dim)
+
+        semantic_matrix = torch.zeros((num_items, self.semantic_dim), dtype=torch.float32)
+        if isinstance(item_semantic_embeddings, dict):
+            iterator = item_semantic_embeddings.items()
+        else:
+            iterator = enumerate(item_semantic_embeddings)
+
+        for iid, emb in iterator:
+            iid = int(iid)
+            if iid < 0 or iid >= num_items:
+                continue
+            if not torch.is_tensor(emb):
+                emb = torch.as_tensor(emb)
+            emb = emb.view(-1).detach().cpu().float()
+            copy_dim = min(self.semantic_dim, emb.numel())
+            semantic_matrix[iid, :copy_dim] = emb[:copy_dim]
+
+        selected_item_mask = torch.as_tensor(selected_item_mask, dtype=torch.float32).view(-1, 1)
+        if selected_item_mask.size(0) != num_items:
+            raise ValueError(
+                f"selected_item_mask length mismatch: {selected_item_mask.size(0)} vs {num_items}"
+            )
+
+        self.register_buffer("item_semantic_emb", semantic_matrix)
+        self.register_buffer("item_selected_mask", selected_item_mask)
+
+    def _fuse_items(
+        self,
+        item_ids: torch.Tensor,
+        item_gnn: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        semantic_emb = self.item_semantic_emb[item_ids].to(item_gnn.device)
+        selected_mask = self.item_selected_mask[item_ids].to(item_gnn.device)
+        fused, sem_proj, _ = self.item_fusion(item_gnn, semantic_emb, selected_mask)
+        return fused, sem_proj, selected_mask
+
+    def forward(
+        self,
+        users: torch.Tensor,
+        pos_items: torch.Tensor,
+        neg_items: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        _, _, user_g, item_g = self.get_all_embeddings()
+
+        user_batch = user_g[users]
+
+        pos_base = item_g[pos_items]
+        neg_base = item_g[neg_items]
+
+        pos_fused, pos_sem_proj, pos_mask = self._fuse_items(pos_items, pos_base)
+        neg_fused, neg_sem_proj, neg_mask = self._fuse_items(neg_items, neg_base)
+
+        return {
+            "user": user_batch,
+            "pos_fused": pos_fused,
+            "neg_fused": neg_fused,
+            "pos_base": pos_base,
+            "neg_base": neg_base,
+            "pos_sem_proj": pos_sem_proj,
+            "neg_sem_proj": neg_sem_proj,
+            "pos_mask": pos_mask,
+            "neg_mask": neg_mask,
+        }
+
+    @torch.no_grad()
+    def predict(self, users: torch.Tensor):
+        _, _, user_g, item_g = self.get_all_embeddings()
+        users = users.to(user_g.device)
+        all_item_ids = torch.arange(self.num_items, device=item_g.device, dtype=torch.long)
+        item_fused, _, _ = self._fuse_items(all_item_ids, item_g)
+        return user_g[users], item_fused

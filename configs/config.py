@@ -7,8 +7,8 @@ import yaml
 
 @dataclass
 class DataConfig:
-    dataset: str = "movie"
-    data_dir: str = "data"
+    dataset: str = "yelp"
+    data_dir: str = "data_new/yelp"
     min_user_interactions: int = 5
     min_item_interactions: int = 5
     recency_half_life: float = 30.0  # days
@@ -52,6 +52,7 @@ class TrainingConfig:
     reg: float = 1e-4
     save_path: Optional[str] = None
     item_top_ratio: float = 0.05
+    eval_interval: int = 1
 
 
 @dataclass
@@ -67,12 +68,37 @@ class ProfileConfig:
 
 
 @dataclass
+class SemanticConfig:
+    enable: bool = True
+    budget_ratio: float = 0.01
+    min_selected_items: int = 10
+    popularity_penalty: float = 0.1
+    cache_dir: str = "cache/semantic_items"
+    llama_url: str = "http://127.0.0.1:8080/v1/chat/completions"
+    llama_model: str = "local"
+    llama_max_tokens: int = 128
+    llama_temperature: float = 0.2
+    request_timeout: int = 60
+    disable_proxy_for_local: bool = True
+    embedding_model_path: str = (
+        "/home/stu256475/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B/"
+        "snapshots/c54f2e6e80b2d7b7de06f51cec4959f6b3e03418"
+    )
+    embedding_batch_size: int = 16
+    align_weight: float = 0.05
+    consistency_weight: float = 0.05
+    freeze_backbone_epochs: int = 1
+    save_artifacts: bool = True
+
+
+@dataclass
 class ExperimentConfig:
     data: DataConfig = field(default_factory=DataConfig)
     lightgcn: LightGCNConfig = field(default_factory=LightGCNConfig)
     pretrain: PretrainingConfig = field(default_factory=PretrainingConfig)
     train: TrainingConfig = field(default_factory=TrainingConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
+    semantic: SemanticConfig = field(default_factory=SemanticConfig)
     seed: int = 42
 
     from typing import Union
@@ -86,5 +112,6 @@ class ExperimentConfig:
             pretrain=PretrainingConfig(**cfg_dict.get("pretrain", {})),
             train=TrainingConfig(**cfg_dict.get("train", {})),
             profile=ProfileConfig(**cfg_dict.get("profile", {})),
+            semantic=SemanticConfig(**cfg_dict.get("semantic", {})),
             seed=cfg_dict.get("seed", 42),
         )

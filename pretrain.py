@@ -20,6 +20,25 @@ from model.lightgcn import LightGCN
 from utils.losses import bpr_loss
 from utils.metrics import evaluate_all_ranking, get_user_item_dict
 
+
+def _safe_wandb_init(cfg):
+    if str(os.getenv("WANDB_DISABLED", "")).lower() in {"1", "true", "yes"}:
+        print("[info] wandb disabled by WANDB_DISABLED.")
+        return None
+    try:
+        return wandb.init(project="SelectiveLLMRec_pretrain", config=cfg)
+    except Exception as exc:
+        print(f"[warn] wandb disabled due to init failure: {exc}")
+        return None
+
+
+def _safe_wandb_log(payload: dict):
+    try:
+        wandb.log(payload)
+    except Exception:
+        pass
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -55,7 +74,7 @@ def load_data(cfg_path: str):
 
 def train(cfg_path: str):
     cfg = ExperimentConfig.from_yaml(cfg_path)
-    wandb.init(project="SelectiveLLMRec_pretrain", config=cfg)
+    _safe_wandb_init(cfg)
     set_seed(cfg.seed)
 
     device = torch.device(cfg.pretrain.device if torch.cuda.is_available() else "cpu")
@@ -139,7 +158,7 @@ def train(cfg_path: str):
             total_loss += loss.item()
 
         avg_loss = total_loss / len(loader)
-        wandb.log({"Loss": avg_loss})
+        _safe_wandb_log({"Loss": avg_loss})
         print(f"Epoch {epoch+1}/{cfg.pretrain.epochs}, Loss: {avg_loss:.4f}")
     
         if (epoch+1) % 10 == 0:
@@ -159,7 +178,7 @@ def train(cfg_path: str):
                 f"Validation - Recall@10: {recall_res[10]:.4f}, NDCG@10: {ndcg_res[10]:.4f}, "
                 f"Recall@20: {recall_res[20]:.4f}, NDCG@20: {ndcg_res[20]:.4f}"
             ) 
-            wandb.log({
+            _safe_wandb_log({
                 "Val_Recall@10": recall_res[10],
                 "Val_NDCG@10": ndcg_res[10],
                 "Val_Recall@20": recall_res[20],
@@ -227,7 +246,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="configs/movie.yaml",
+        default="configs/yelp.yaml",
         help="Path to YAML config file.",
     )
     args = parser.parse_args()

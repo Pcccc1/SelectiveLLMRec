@@ -1,0 +1,52 @@
+seed: 42
+data:
+  dataset: yelp
+  profile_path: data_new/yelp/itm_prf.pkl
+  data_dir: data_new/yelp
+  min_user_interactions: 5
+  min_item_interactions: 5
+  recency_half_life: 30.0
+lightgcn:
+  embedding_dim: 64
+  n_layers: 3
+pretrain:
+  epochs: 1000
+  batch_size: 1024
+  lr: 0.001
+  weight_decay: 0
+  device: cuda
+  num_workers: 0
+  reg: 1e-4
+  save_path: checkpoints/lightgcn_best_yelp_pretrain.pth
+train:
+  epochs: 30
+  batch_size: 1024
+  lr: 0.0005
+  weight_decay: 0
+  num_workers: 0
+  device: cuda
+  reg: 1e-4
+  eval_interval: 1
+  log_dir: runs/budgeted
+  save_path: checkpoints/lightgcn_budgeted_yelp_aggressive.pth
+semantic:
+  source: profile_embedding
+  budget_ratio: 0.8
+  min_selected_items: 256
+  popularity_penalty: 0.0
+  long_tail_boost: 0.0
+  value_alpha: 0.0
+  value_beta: 0.0
+  value_gamma: 1.0
+  cache_dir: cache/semantic_items
+  profile_embedding_path: data_new/yelp/itm_emb_np.pkl
+  llm_fail_fast: true
+  align_weight: 0.02
+  consistency_weight: 0.0
+  gate_l2_weight: 0.0
+  fusion_hidden_dim: 256
+  gate_temperature: 0.5
+  max_residual_scale: 1.0
+  gate_bias: -0.5
+  freeze_backbone_epochs: 0
+  save_artifacts: true

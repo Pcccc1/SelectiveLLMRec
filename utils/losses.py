@@ -49,3 +49,18 @@ def embedding_consistency_loss(
         return torch.zeros((), device=fused_emb.device)
     sq = (fused_emb - base_emb).pow(2).sum(dim=-1)
     return (sq * mask).sum() / (denom + 1e-8)
+
+
+def fusion_gate_l2_loss(
+    gate_alpha: torch.Tensor,
+    selected_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Keep fusion gate conservative on selected nodes by penalizing large gate values.
+    """
+    mask = selected_mask.view(-1)
+    denom = mask.sum()
+    if denom.item() <= 0:
+        return torch.zeros((), device=gate_alpha.device)
+    sq = gate_alpha.view(-1).pow(2)
+    return (sq * mask).sum() / (denom + 1e-8)

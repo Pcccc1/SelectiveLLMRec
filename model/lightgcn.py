@@ -352,12 +352,23 @@ class LightGCNBudgetedSemantic(LightGCN):
         item_semantic_embeddings: dict[int, torch.Tensor] | torch.Tensor,
         selected_item_mask: torch.Tensor,
         semantic_dim: int,
+        fusion_hidden_dim: int = 256,
+        gate_temperature: float = 1.0,
+        max_residual_scale: float = 0.35,
+        gate_bias: float = -2.5,
         device: str | torch.device = "cuda",
     ):
         super().__init__(num_users, num_items, embedding_dim, n_layers, adj_mat)
         self.device = torch.device(device)
         self.semantic_dim = int(semantic_dim)
-        self.item_fusion = ItemSemanticFusionHead(gnn_dim=embedding_dim, semantic_dim=self.semantic_dim)
+        self.item_fusion = ItemSemanticFusionHead(
+            gnn_dim=embedding_dim,
+            semantic_dim=self.semantic_dim,
+            hidden_dim=int(fusion_hidden_dim),
+            gate_temperature=float(gate_temperature),
+            max_residual_scale=float(max_residual_scale),
+            gate_bias=float(gate_bias),
+        )
 
         semantic_matrix = torch.zeros((num_items, self.semantic_dim), dtype=torch.float32)
         if isinstance(item_semantic_embeddings, dict):
@@ -388,11 +399,11 @@ class LightGCNBudgetedSemantic(LightGCN):
         self,
         item_ids: torch.Tensor,
         item_gnn: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         semantic_emb = self.item_semantic_emb[item_ids].to(item_gnn.device)
         selected_mask = self.item_selected_mask[item_ids].to(item_gnn.device)
-        fused, sem_proj, _ = self.item_fusion(item_gnn, semantic_emb, selected_mask)
-        return fused, sem_proj, selected_mask
+        fused, sem_proj, alpha, _ = self.item_fusion(item_gnn, semantic_emb, selected_mask)
+        return fused, sem_proj, selected_mask, alpha
 
     def forward(
         self,
@@ -407,8 +418,8 @@ class LightGCNBudgetedSemantic(LightGCN):
         pos_base = item_g[pos_items]
         neg_base = item_g[neg_items]
 
-        pos_fused, pos_sem_proj, pos_mask = self._fuse_items(pos_items, pos_base)
-        neg_fused, neg_sem_proj, neg_mask = self._fuse_items(neg_items, neg_base)
+        pos_fused, pos_sem_proj, pos_mask, pos_alpha = self._fuse_items(pos_items, pos_base)
+        neg_fused, neg_sem_proj, neg_mask, neg_alpha = self._fuse_items(neg_items, neg_base)
 
         return {
             "user": user_batch,
@@ -420,6 +431,8 @@ class LightGCNBudgetedSemantic(LightGCN):
             "neg_sem_proj": neg_sem_proj,
             "pos_mask": pos_mask,
             "neg_mask": neg_mask,
+            "pos_alpha": pos_alpha,
+            "neg_alpha": neg_alpha,
         }
 
     @torch.no_grad()
@@ -427,5 +440,5 @@ class LightGCNBudgetedSemantic(LightGCN):
         _, _, user_g, item_g = self.get_all_embeddings()
         users = users.to(user_g.device)
         all_item_ids = torch.arange(self.num_items, device=item_g.device, dtype=torch.long)
-        item_fused, _, _ = self._fuse_items(all_item_ids, item_g)
+        item_fused, _, _, _ = self._fuse_items(all_item_ids, item_g)
         return user_g[users], item_fused

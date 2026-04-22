@@ -53,6 +53,9 @@ class TrainingConfig:
     save_path: Optional[str] = None
     item_top_ratio: float = 0.05
     eval_interval: int = 1
+    selection_metric: str = "ndcg20"
+    log_dir: str = "runs/budgeted"
+    run_name: Optional[str] = None
 
 
 @dataclass
@@ -70,16 +73,23 @@ class ProfileConfig:
 @dataclass
 class SemanticConfig:
     enable: bool = True
+    source: str = "llm_summary"  # one of: llm_summary, profile_embedding
     budget_ratio: float = 0.01
     min_selected_items: int = 10
     popularity_penalty: float = 0.1
+    long_tail_boost: float = 0.0
+    value_alpha: float = 0.33
+    value_beta: float = 0.33
+    value_gamma: float = 0.34
     cache_dir: str = "cache/semantic_items"
     llama_url: str = "http://127.0.0.1:8080/v1/chat/completions"
     llama_model: str = "local"
     llama_max_tokens: int = 128
     llama_temperature: float = 0.2
     request_timeout: int = 60
+    llm_fail_fast: bool = True
     disable_proxy_for_local: bool = True
+    profile_embedding_path: Optional[str] = None
     embedding_model_path: str = (
         "/home/stu256475/.cache/huggingface/hub/models--Qwen--Qwen3-Embedding-0.6B/"
         "snapshots/c54f2e6e80b2d7b7de06f51cec4959f6b3e03418"
@@ -87,6 +97,11 @@ class SemanticConfig:
     embedding_batch_size: int = 16
     align_weight: float = 0.05
     consistency_weight: float = 0.05
+    gate_l2_weight: float = 0.001
+    fusion_hidden_dim: int = 256
+    gate_temperature: float = 1.0
+    max_residual_scale: float = 0.35
+    gate_bias: float = -2.5
     freeze_backbone_epochs: int = 1
     save_artifacts: bool = True
 

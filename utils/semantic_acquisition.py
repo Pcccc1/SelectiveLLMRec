@@ -26,9 +26,21 @@ Keep content concise and recommendation-oriented.
 
 
 class ItemBudgetSelector:
-    def __init__(self, parser, popularity_penalty: float = 0.1):
+    def __init__(
+        self,
+        parser,
+        popularity_penalty: float = 0.1,
+        value_alpha: float = 0.33,
+        value_beta: float = 0.33,
+        value_gamma: float = 0.34,
+        long_tail_boost: float = 0.0,
+    ):
         self.parser = parser
         self.popularity_penalty = float(popularity_penalty)
+        self.value_alpha = float(value_alpha)
+        self.value_beta = float(value_beta)
+        self.value_gamma = float(value_gamma)
+        self.long_tail_boost = float(long_tail_boost)
 
     def _item_popularity(self) -> torch.Tensor:
         pop = torch.zeros(self.parser.num_items, dtype=torch.float32)
@@ -53,10 +65,18 @@ class ItemBudgetSelector:
             parser=self.parser,
             item_emb_layers=cpu_item_layers,
             item_id_emb=cpu_item_id_emb,
+            alpha=self.value_alpha,
+            beta=self.value_beta,
+            gamma=self.value_gamma,
         )
         value_score = evaluator.calculate().detach().cpu()
         pop_penalty = self._item_popularity()
-        final_score = value_score - self.popularity_penalty * pop_penalty
+        long_tail_signal = 1.0 - pop_penalty
+        final_score = (
+            value_score
+            - self.popularity_penalty * pop_penalty
+            + self.long_tail_boost * long_tail_signal
+        )
 
         num_items = self.parser.num_items
         k = int(num_items * float(budget_ratio))
@@ -77,6 +97,7 @@ class LocalLlamaSemanticAcquirer:
         temperature: float,
         timeout: int,
         cache_dir: str,
+        llm_fail_fast: bool = True,
         disable_proxy_for_local: bool = True,
     ):
         self.llama_url = llama_url
@@ -85,6 +106,8 @@ class LocalLlamaSemanticAcquirer:
         self.temperature = float(temperature)
         self.timeout = int(timeout)
         self.cache_dir = cache_dir
+        self.llm_fail_fast = bool(llm_fail_fast)
+        self._llm_available = True
         os.makedirs(self.cache_dir, exist_ok=True)
 
         self.session = requests.Session()
@@ -192,6 +215,17 @@ class LocalLlamaSemanticAcquirer:
             return cached
 
         profile_text = self._profile_to_text(profile)
+        if not self._llm_available:
+            data = self._normalize_semantic_dict(
+                {
+                    "semantic_summary": profile_text[:400],
+                    "category_tags": [],
+                    "target_preferences": [],
+                }
+            )
+            self._save_cache(item_id, data)
+            return data
+
         prompt = self._build_prompt(item_id, profile_text)
         payload = {
             "model": self.llama_model,
@@ -209,6 +243,8 @@ class LocalLlamaSemanticAcquirer:
             raw_text = resp.json()["choices"][0]["message"]["content"]
             data = self._normalize_semantic_dict(self._extract_json_obj(raw_text))
         except Exception:
+            if self.llm_fail_fast:
+                self._llm_available = False
             # Fallback keeps training pipeline runnable even when local LLM is unstable.
             data = self._normalize_semantic_dict(
                 {

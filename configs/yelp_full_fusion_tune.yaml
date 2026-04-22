@@ -1,0 +1,39 @@
+seed: 42
+data:
+  dataset: yelp
+  profile_path: data_new/yelp/itm_prf.pkl
+  data_dir: data_new/yelp
+  min_user_interactions: 5
+  min_item_interactions: 5
+  recency_half_life: 30.0
+lightgcn:
+  embedding_dim: 64
+  n_layers: 3
+pretrain:
+  epochs: 1000
+  batch_size: 1024
+  lr: 0.001
+  weight_decay: 0
+  device: cuda
+  num_workers: 0
+  reg: 1e-4
+  save_path: checkpoints/lightgcn_best_yelp_pretrain.pth
+train:
+  epochs: 20
+  batch_size: 1024
+  lr: 0.0005
+  weight_decay: 0
+  num_workers: 0
+  device: cuda
+  reg: 1e-4
+  eval_interval: 1
+  save_path: checkpoints/lightgcn_fullfusion_yelp_tune.pth
+profile:
+  num_clusters: 200
+  top_k: 5
+  cluster_representatives: 50
+  item_top_ratio: 0.05
+  profile_dim: 128
+  prompt_user_examples: 5
+  prompt_item_max_words: 80
+  llm_placeholder: true

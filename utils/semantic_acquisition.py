@@ -5,13 +5,18 @@ import os
 import re
 from typing import Dict, Iterable, Any
 
-import requests
 import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import HashingVectorizer
 
-from utils.item_node_value_evaluation import Node_value_Evaluator
+from utils.item_node_value_evaluation import NodeValueEvaluator, UserNodeValueEvaluator
+
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+except Exception:
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
+    BitsAndBytesConfig = None
 
 
 SYSTEM_PROMPT = """You are an expert in recommendation semantics.
@@ -23,6 +28,21 @@ Given one item profile text, output ONLY valid JSON in this schema:
 }
 Keep content concise and recommendation-oriented.
 """
+
+USER_CLUSTER_SYSTEM_PROMPT = """You are an expert in recommendation semantics.
+Given one user-cluster profile text, output ONLY valid JSON in this schema:
+{
+  "semantic_summary": "short summary <= 60 words",
+  "category_tags": ["tag1", "tag2", "tag3"],
+  "target_preferences": ["pref1", "pref2", "pref3"]
+}
+Summarize stable interests and preference styles for this cluster.
+Keep content concise and recommendation-oriented.
+"""
+
+
+def _minmax_norm(x: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+    return (x - x.min()) / (x.max() - x.min() + eps)
 
 
 class ItemBudgetSelector:
@@ -61,7 +81,7 @@ class ItemBudgetSelector:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         cpu_item_layers = [x.detach().cpu() for x in item_emb_layers]
         cpu_item_id_emb = item_id_emb.detach().cpu()
-        evaluator = Node_value_Evaluator(
+        evaluator = NodeValueEvaluator(
             parser=self.parser,
             item_emb_layers=cpu_item_layers,
             item_id_emb=cpu_item_id_emb,
@@ -88,35 +108,137 @@ class ItemBudgetSelector:
         return selected, final_score
 
 
-class LocalLlamaSemanticAcquirer:
+class UserBudgetSelector:
+    """
+    Select high-need users for semantic transfer.
+
+    The score is a normalized semantic-need proxy:
+      value_score - activity_penalty * activity + cold_start_boost * (1 - activity)
+    """
+
     def __init__(
         self,
-        llama_url: str,
-        llama_model: str,
+        parser,
+        activity_penalty: float = 0.0,
+        value_alpha: float = 0.33,
+        value_beta: float = 0.33,
+        value_gamma: float = 0.34,
+        cold_start_boost: float = 0.2,
+    ):
+        self.parser = parser
+        self.activity_penalty = float(activity_penalty)
+        self.value_alpha = float(value_alpha)
+        self.value_beta = float(value_beta)
+        self.value_gamma = float(value_gamma)
+        self.cold_start_boost = float(cold_start_boost)
+
+    def _user_activity(self) -> torch.Tensor:
+        act = torch.zeros(self.parser.num_users, dtype=torch.float32)
+        for u, _ in self.parser.train:
+            act[u] += 1.0
+        return _minmax_norm(act)
+
+    def select(
+        self,
+        user_emb_layers: list[torch.Tensor],
+        user_id_emb: torch.Tensor,
+        budget_ratio: float,
+        min_selected_users: int = 1,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        cpu_user_layers = [x.detach().cpu() for x in user_emb_layers]
+        cpu_user_id_emb = user_id_emb.detach().cpu()
+        evaluator = UserNodeValueEvaluator(
+            parser=self.parser,
+            user_emb_layers=cpu_user_layers,
+            user_id_emb=cpu_user_id_emb,
+            alpha=self.value_alpha,
+            beta=self.value_beta,
+            gamma=self.value_gamma,
+            cold_start_boost=0.0,
+        )
+        value_score = evaluator.calculate().detach().cpu()
+        activity = self._user_activity()
+        low_activity = 1.0 - activity
+        need_score = value_score - self.activity_penalty * activity + self.cold_start_boost * low_activity
+        need_score = _minmax_norm(need_score)
+
+        num_users = self.parser.num_users
+        k = int(num_users * float(budget_ratio))
+        k = max(int(min_selected_users), k)
+        k = max(1, min(k, num_users))
+        selected = torch.topk(need_score, k=k).indices
+        selected, _ = torch.sort(selected)
+        return selected, need_score
+
+
+class TransformersSemanticAcquirer:
+    def __init__(
+        self,
+        model_path: str,
         max_tokens: int,
         temperature: float,
         timeout: int,
         cache_dir: str,
         llm_fail_fast: bool = True,
-        disable_proxy_for_local: bool = True,
+        load_in_8bit: bool = True,
+        device_map: str = "auto",
+        trust_remote_code: bool = False,
+        system_prompt: str = SYSTEM_PROMPT,
+        cache_prefix: str = "item",
+        entity_name: str = "item",
+        entity_field_name: str = "item_profile",
     ):
-        self.llama_url = llama_url
-        self.llama_model = llama_model
+        self.model_path = model_path
         self.max_tokens = int(max_tokens)
         self.temperature = float(temperature)
         self.timeout = int(timeout)
         self.cache_dir = cache_dir
         self.llm_fail_fast = bool(llm_fail_fast)
+        self.load_in_8bit = bool(load_in_8bit)
+        self.device_map = str(device_map)
+        self.trust_remote_code = bool(trust_remote_code)
+        self.system_prompt = str(system_prompt)
+        self.cache_prefix = str(cache_prefix)
+        self.entity_name = str(entity_name)
+        self.entity_field_name = str(entity_field_name)
         self._llm_available = True
         os.makedirs(self.cache_dir, exist_ok=True)
 
-        self.session = requests.Session()
-        # Local LLM endpoints are often blocked by shell proxy env vars.
-        if disable_proxy_for_local:
-            self.session.trust_env = False
+        self.tokenizer = None
+        self.model = None
+
+    def _init_model(self) -> None:
+        if AutoTokenizer is None or AutoModelForCausalLM is None or BitsAndBytesConfig is None:
+            raise ImportError(
+                "transformers/bitsandbytes dependencies are missing. "
+                "Please install: transformers, accelerate, bitsandbytes."
+            )
+
+        if self.load_in_8bit and not torch.cuda.is_available():
+            raise RuntimeError("8-bit quantization requires CUDA, but CUDA is not available.")
+
+        quantization_config = BitsAndBytesConfig(load_in_8bit=True) if self.load_in_8bit else None
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_path,
+            trust_remote_code=self.trust_remote_code,
+        )
+        if self.tokenizer.pad_token_id is None and self.tokenizer.eos_token_id is not None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        model_kwargs = {
+            "device_map": self.device_map,
+            "trust_remote_code": self.trust_remote_code,
+        }
+        if quantization_config is not None:
+            model_kwargs["quantization_config"] = quantization_config
+        else:
+            model_kwargs["torch_dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
+
+        self.model = AutoModelForCausalLM.from_pretrained(self.model_path, **model_kwargs)
+        self.model.eval()
 
     def _cache_path(self, item_id: int) -> str:
-        return os.path.join(self.cache_dir, f"item_{item_id}.json")
+        return os.path.join(self.cache_dir, f"{self.cache_prefix}_{item_id}.json")
 
     def _load_cache(self, item_id: int) -> dict[str, Any] | None:
         path = self._cache_path(item_id)
@@ -161,8 +283,8 @@ class LocalLlamaSemanticAcquirer:
 
     def _build_prompt(self, item_id: int, profile_text: str) -> str:
         return (
-            f"item_id: {item_id}\n"
-            "item_profile:\n"
+            f"{self.entity_name}_id: {item_id}\n"
+            f"{self.entity_field_name}:\n"
             f"{profile_text}\n"
             "\nOutput JSON only."
         )
@@ -183,6 +305,47 @@ class LocalLlamaSemanticAcquirer:
                     return obj
             except Exception:
                 continue
+
+        # Best-effort fallback for truncated JSON (e.g., max token cutoff).
+        # It recovers fields even when closing braces are missing.
+        summary_match = re.search(
+            r'"semantic_summary"\s*:\s*"((?:\\.|[^"\\])*)"',
+            raw_text,
+            flags=re.DOTALL,
+        )
+        category_match = re.search(
+            r'"category_tags"\s*:\s*\[(.*?)\]',
+            raw_text,
+            flags=re.DOTALL,
+        )
+        pref_match = re.search(
+            r'"target_preferences"\s*:\s*\[(.*?)\]',
+            raw_text,
+            flags=re.DOTALL,
+        )
+        if summary_match or category_match or pref_match:
+            summary = ""
+            if summary_match:
+                summary = bytes(summary_match.group(1), "utf-8").decode("unicode_escape")
+
+            def _extract_list_items(block_match) -> list[str]:
+                if not block_match:
+                    return []
+                block = block_match.group(1)
+                vals = re.findall(r'"((?:\\.|[^"\\])*)"', block, flags=re.DOTALL)
+                out: list[str] = []
+                for v in vals:
+                    try:
+                        out.append(bytes(v, "utf-8").decode("unicode_escape"))
+                    except Exception:
+                        out.append(v)
+                return out
+
+            return {
+                "semantic_summary": summary,
+                "category_tags": _extract_list_items(category_match),
+                "target_preferences": _extract_list_items(pref_match),
+            }
 
         return {
             "semantic_summary": raw_text[:400],
@@ -209,6 +372,57 @@ class LocalLlamaSemanticAcquirer:
             "target_preferences": target_preferences[:8],
         }
 
+    def _generate(self, prompt: str) -> str:
+        if self.model is None or self.tokenizer is None:
+            self._init_model()
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            rendered_prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except TypeError:
+            rendered_prompt = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        model_inputs = self.tokenizer(rendered_prompt, return_tensors="pt")
+        input_ids = model_inputs["input_ids"]
+        attention_mask = model_inputs.get("attention_mask")
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
+
+        model_device = next(self.model.parameters()).device
+        input_ids = input_ids.to(model_device)
+        attention_mask = attention_mask.to(model_device)
+
+        do_sample = self.temperature > 0
+        gen_kwargs = {
+            "max_new_tokens": self.max_tokens,
+            "do_sample": do_sample,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+            "max_time": float(max(1, self.timeout)),
+        }
+        if do_sample:
+            gen_kwargs["temperature"] = self.temperature
+            gen_kwargs["top_p"] = 0.9
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **gen_kwargs,
+            )
+        generated_ids = outputs[0, input_ids.shape[1] :]
+        return self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
     def acquire_one(self, item_id: int, profile: Any) -> dict[str, Any]:
         cached = self._load_cache(item_id)
         if cached is not None:
@@ -216,43 +430,24 @@ class LocalLlamaSemanticAcquirer:
 
         profile_text = self._profile_to_text(profile)
         if not self._llm_available:
-            data = self._normalize_semantic_dict(
-                {
-                    "semantic_summary": profile_text[:400],
-                    "category_tags": [],
-                    "target_preferences": [],
-                }
+            raise RuntimeError(
+                f"LLM became unavailable before item_id={item_id}. "
+                "Fallback is disabled; please fix LLM generation and rerun."
             )
-            self._save_cache(item_id, data)
-            return data
 
         prompt = self._build_prompt(item_id, profile_text)
-        payload = {
-            "model": self.llama_model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-        }
 
         try:
-            resp = self.session.post(self.llama_url, json=payload, timeout=self.timeout)
-            resp.raise_for_status()
-            raw_text = resp.json()["choices"][0]["message"]["content"]
+            raw_text = self._generate(prompt)
             data = self._normalize_semantic_dict(self._extract_json_obj(raw_text))
-        except Exception:
+        except Exception as exc:
+            print(f"[TransformersSemanticAcquirer] generation failed for item_id={item_id}: {exc}")
             if self.llm_fail_fast:
                 self._llm_available = False
-            # Fallback keeps training pipeline runnable even when local LLM is unstable.
-            data = self._normalize_semantic_dict(
-                {
-                    "semantic_summary": profile_text[:400],
-                    "category_tags": [],
-                    "target_preferences": [],
-                }
-            )
+            raise RuntimeError(
+                f"Failed to acquire semantic JSON for item_id={item_id}. "
+                "Fallback is disabled."
+            ) from exc
 
         self._save_cache(item_id, data)
         return data
@@ -266,10 +461,38 @@ class LocalLlamaSemanticAcquirer:
         return result
 
 
+class UserClusterSemanticAcquirer(TransformersSemanticAcquirer):
+    def __init__(
+        self,
+        model_path: str,
+        max_tokens: int,
+        temperature: float,
+        timeout: int,
+        cache_dir: str,
+        llm_fail_fast: bool = True,
+        load_in_8bit: bool = True,
+        device_map: str = "auto",
+        trust_remote_code: bool = False,
+    ):
+        super().__init__(
+            model_path=model_path,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            cache_dir=cache_dir,
+            llm_fail_fast=llm_fail_fast,
+            load_in_8bit=load_in_8bit,
+            device_map=device_map,
+            trust_remote_code=trust_remote_code,
+            system_prompt=USER_CLUSTER_SYSTEM_PROMPT,
+            cache_prefix="cluster",
+            entity_name="cluster",
+            entity_field_name="cluster_profile",
+        )
+
 class SemanticTextEncoder:
     def __init__(self, model_path: str, device: str, batch_size: int = 16):
         self.model = None
-        self.hashing = None
         try:
             self.model = SentenceTransformer(
                 model_path,
@@ -277,15 +500,11 @@ class SemanticTextEncoder:
                 device=device,
             )
         except Exception as exc:
-            print(
-                "[SemanticTextEncoder] Failed to load SentenceTransformer model, "
-                f"fallback to HashingVectorizer. reason={exc}"
-            )
-            self.hashing = HashingVectorizer(
-                n_features=1024,
-                alternate_sign=False,
-                norm="l2",
-            )
+            raise RuntimeError(
+                "Failed to load the configured semantic embedding model. "
+                "HashingVectorizer fallback is disabled because experiments must use local Qwen embeddings. "
+                f"embedding_model_path={model_path!r}, reason={exc}"
+            ) from exc
         self.device = device
         self.batch_size = int(batch_size)
 
@@ -321,7 +540,4 @@ class SemanticTextEncoder:
             )
             return {iid: emb[i].detach().cpu() for i, iid in enumerate(item_ids)}
 
-        sparse = self.hashing.transform(texts)
-        dense = sparse.toarray().astype(np.float32)
-        emb = torch.from_numpy(dense)
-        return {iid: emb[i].detach().cpu() for i, iid in enumerate(item_ids)}
+        raise RuntimeError("SemanticTextEncoder model is not initialized.")

@@ -5,7 +5,6 @@ data:
   profile_path: data_new/amazon/itm_prf.pkl
   min_user_interactions: 5
   min_item_interactions: 5
-  recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
   n_layers: 3
@@ -27,12 +26,3 @@ train:
   num_workers: 8
   reg: 1e-4
   save_path: checkpoints/lightgcn_best_amazon.pth
-profile:
-  num_clusters: 200
-  top_k: 5
-  cluster_representatives: 50
-  item_top_ratio: 0.05
-  profile_dim: 128
-  prompt_user_examples: 5
-  prompt_item_max_words: 80
-  llm_placeholder: true

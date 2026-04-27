@@ -1,11 +1,10 @@
-seed: 42
+seed: 2024
 data:
   dataset: yelp
   profile_path: data_new/yelp/itm_prf.pkl
   data_dir: data_new/yelp
   min_user_interactions: 5
   min_item_interactions: 5
-  recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
   n_layers: 3
@@ -14,23 +13,28 @@ pretrain:
   batch_size: 1024
   lr: 0.001
   weight_decay: 0
-  device: cuda
+  device: cuda:1
   num_workers: 0
   reg: 1e-4
   save_path: checkpoints/lightgcn_best_yelp_pretrain.pth
 train:
-  epochs: 30
+  epochs: 100
   batch_size: 1024
-  lr: 0.0003
+  lr: 0.001
   weight_decay: 0
   num_workers: 0
-  device: cuda
+  device: cuda:1
   reg: 1e-4
   eval_interval: 1
   log_dir: runs/budgeted
+  use_amp: true
+  grad_clip_norm: 5.0
+  scheduler_tmax: 20
+  scheduler_eta_min: 1.0e-6
+  early_stop_patience: 6
   save_path: checkpoints/lightgcn_budgeted_yelp_sota.pth
 semantic:
-  source: profile_embedding
+  source: llm_summary
   budget_ratio: 0.12
   min_selected_items: 32
   popularity_penalty: 0.1
@@ -39,14 +43,37 @@ semantic:
   value_beta: 0.5
   value_gamma: 0.3
   cache_dir: cache/semantic_items
-  profile_embedding_path: data_new/yelp/itm_emb_np.pkl
+  llm_model_path: /home/stu256475/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/c202236235762e1c871ad0ccb60c8ee5ba337b9a
   llm_fail_fast: true
   align_weight: 0.04
-  consistency_weight: 0.03
-  gate_l2_weight: 0.001
+  consistency_weight: 0.05
+  gate_l2_weight: 0.01
   fusion_hidden_dim: 256
   gate_temperature: 0.8
-  max_residual_scale: 0.4
-  gate_bias: -2.2
-  freeze_backbone_epochs: 1
+  max_residual_scale: 0.08
+  gate_bias: -4.0
+  frozen: false
+  freeze_backbone_epochs: 0
+  freeze_backbone: false
+  detach_alignment_target: true
+  ranking_preserve_weight: 0.1
   save_artifacts: true
+  user_enable: true
+  user_source: cluster_llm
+  user_budget_ratio: 0.05
+  min_selected_users: 64
+  user_num_clusters: 64
+  user_cluster_representatives: 24
+  user_prompt_items_per_user: 5
+  user_value_alpha: 0.3
+  user_value_beta: 0.4
+  user_value_gamma: 0.3
+  user_activity_penalty: 0.05
+  user_cold_start_boost: 0.2
+  user_align_weight: 0.003
+  user_consistency_weight: 0.08
+  user_distill_weight: 0.0
+  user_gate_l2_weight: 0.01
+  user_gate_temperature: 0.8
+  user_max_residual_scale: 0.05
+  user_gate_bias: -4.0

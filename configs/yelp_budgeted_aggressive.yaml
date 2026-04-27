@@ -5,7 +5,6 @@ data:
   data_dir: data_new/yelp
   min_user_interactions: 5
   min_item_interactions: 5
-  recency_half_life: 30.0
 lightgcn:
   embedding_dim: 64
   n_layers: 3
@@ -30,7 +29,7 @@ train:
   log_dir: runs/budgeted
   save_path: checkpoints/lightgcn_budgeted_yelp_aggressive.pth
 semantic:
-  source: profile_embedding
+  source: llm_summary
   budget_ratio: 0.8
   min_selected_items: 256
   popularity_penalty: 0.0
@@ -39,7 +38,7 @@ semantic:
   value_beta: 0.0
   value_gamma: 1.0
   cache_dir: cache/semantic_items
-  profile_embedding_path: data_new/yelp/itm_emb_np.pkl
+  llm_model_path: /home/stu256475/.cache/huggingface/hub/models--Qwen--Qwen3.5-9B/snapshots/c202236235762e1c871ad0ccb60c8ee5ba337b9a
   llm_fail_fast: true
   align_weight: 0.02
   consistency_weight: 0.0
@@ -48,5 +47,7 @@ semantic:
   gate_temperature: 0.5
   max_residual_scale: 1.0
   gate_bias: -0.5
+  frozen: false
   freeze_backbone_epochs: 0
+  freeze_backbone: false
   save_artifacts: true

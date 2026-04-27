@@ -62,14 +62,19 @@ def _build_train_args(
         epochs=epochs,
         eval_interval=eval_interval,
         budget_ratio=params["budget_ratio"],
+        user_budget_ratio=params["user_budget_ratio"],
         align_weight=params["align_weight"],
         consistency_weight=params["consistency_weight"],
         gate_l2_weight=params["gate_l2_weight"],
         semantic_source=semantic_source,
+        user_source=params["user_source"],
+        user_enable=True,
         save_path=str(save_path),
         run_name=run_name,
         selection_metric=selection_metric,
         lr=params["lr"],
+        frozen=params["frozen"],
+        freeze_backbone=params["frozen"],
         freeze_backbone_epochs=params["freeze_backbone_epochs"],
         gate_temperature=params["gate_temperature"],
         max_residual_scale=params["max_residual_scale"],
@@ -80,6 +85,8 @@ def _build_train_args(
         value_alpha=params["value_alpha"],
         value_beta=params["value_beta"],
         value_gamma=params["value_gamma"],
+        user_num_clusters=params["user_num_clusters"],
+        user_distill_weight=params["user_distill_weight"],
     )
 
 
@@ -91,14 +98,19 @@ def main():
     argp.add_argument("--max_trials", type=int, default=8)
     argp.add_argument("--epochs", type=int, default=8)
     argp.add_argument("--eval_interval", type=int, default=1)
-    argp.add_argument("--semantic_source", default="profile_embedding")
+    argp.add_argument("--semantic_source", default="llm_summary")
     argp.add_argument("--selection_metric", default="ndcg10")
     argp.add_argument("--objective_metric", default="val_ndcg@10")
     argp.add_argument("--random_seed", type=int, default=2026)
 
     argp.add_argument("--seeds", default="42,7,2024")
     argp.add_argument("--budget_ratios", default="0.5,0.8,1.0")
+    argp.add_argument("--user_budget_ratios", default="0.1,0.2,0.3")
+    argp.add_argument("--user_sources", default="cluster_llm")
+    argp.add_argument("--user_num_clusters", default="64,128,256")
+    argp.add_argument("--user_distill_weights", default="0.03,0.05,0.08")
     argp.add_argument("--lrs", default="0.0003,0.0005,0.0008")
+    argp.add_argument("--frozen", default="false")
     argp.add_argument("--align_weights", default="0.01,0.02,0.03")
     argp.add_argument("--consistency_weights", default="0.0,0.005,0.01")
     argp.add_argument("--gate_l2_weights", default="0.0,0.0001")
@@ -124,7 +136,10 @@ def main():
     space = {
         "seed": _parse_list(args.seeds, int),
         "budget_ratio": _parse_list(args.budget_ratios, float),
+        "user_budget_ratio": _parse_list(args.user_budget_ratios, float),
+        "user_source": _parse_list(args.user_sources, str),
         "lr": _parse_list(args.lrs, float),
+        "frozen": _parse_list(args.frozen, lambda x: x.lower() in {"1", "true", "yes", "y", "on"}),
         "align_weight": _parse_list(args.align_weights, float),
         "consistency_weight": _parse_list(args.consistency_weights, float),
         "gate_l2_weight": _parse_list(args.gate_l2_weights, float),
@@ -138,6 +153,8 @@ def main():
         "value_alpha": _parse_list(args.value_alpha, float),
         "value_beta": _parse_list(args.value_beta, float),
         "value_gamma": _parse_list(args.value_gamma, float),
+        "user_num_clusters": _parse_list(args.user_num_clusters, int),
+        "user_distill_weight": _parse_list(args.user_distill_weights, float),
     }
 
     candidates = _sample_candidates(args.mode, args.max_trials, rnd, space)

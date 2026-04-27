@@ -64,3 +64,23 @@ def fusion_gate_l2_loss(
         return torch.zeros((), device=gate_alpha.device)
     sq = gate_alpha.view(-1).pow(2)
     return (sq * mask).sum() / (denom + 1e-8)
+
+
+def confidence_aware_distillation_loss(
+    student_emb: torch.Tensor,
+    teacher_emb: torch.Tensor,
+    confidence: torch.Tensor,
+    selected_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    Confidence-aware distillation from teacher semantics to student fused embedding.
+    Larger confidence gives stronger supervision weight.
+    """
+    conf = torch.clamp(confidence.view(-1), min=0.0, max=1.0)
+    if selected_mask is not None:
+        conf = conf * selected_mask.view(-1)
+    denom = conf.sum()
+    if denom.item() <= 0:
+        return torch.zeros((), device=student_emb.device)
+    sq = (student_emb - teacher_emb).pow(2).sum(dim=-1)
+    return (sq * conf).sum() / (denom + 1e-8)
